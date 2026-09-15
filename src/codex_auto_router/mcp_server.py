@@ -5,6 +5,7 @@ from typing import Literal
 
 from .config import load_config
 from .jobs import cancel_job, get_job, launch_job, tail_log
+from .route_requests import get_latest_pending_route, get_route_request, submit_route_decision
 
 Tier = Literal["luna_low", "luna_medium", "terra_low", "terra_medium", "sol_medium"]
 
@@ -20,18 +21,60 @@ def create_server():
     server = MCPServer(
         "Codex Auto Router",
         instructions=(
-            "Dispatch coding tasks to the local Codex CLI only after choosing the cheapest sufficient tier. "
-            "Use launch_codex for execution, get_codex_job for status, and get_codex_log only when details are needed."
+            "Route coding tasks with the cheapest sufficient Codex tier. "
+            "For Codex-first handoffs, read a pending request with get_pending_codex_route and return the decision "
+            "with submit_codex_route; the waiting local launcher will start Codex itself. "
+            "Use launch_codex only for ChatGPT-first tasks that do not already have a pending route request."
         ),
     )
+
+    @server.tool()
+    def get_pending_codex_route(request_id: str | None = None) -> dict:
+        """Return a pending Codex-first routing request created by the local launcher.
+
+        When request_id is omitted, the newest pending request is returned. The result includes the user's task,
+        current workspace, Git root/remote/branch when available, and a small working-tree size summary.
+        This tool does not start Codex or consume a Codex task turn.
+        """
+        try:
+            request = get_route_request(request_id) if request_id else get_latest_pending_route()
+        except KeyError:
+            return {"error": "route_not_found", "request_id": request_id}
+        return asdict(request)
+
+    @server.tool()
+    def submit_codex_route(
+        request_id: str,
+        tier: Tier,
+        reason: str = "",
+        confidence: float | None = None,
+    ) -> dict:
+        """Submit ChatGPT's route decision to a waiting local Codex-first launcher.
+
+        The local bridge validates the tier cap before accepting the decision. Do not call launch_codex after a
+        successful submit for the same request; the local launcher resumes and starts Codex automatically.
+        """
+        config = load_config()
+        try:
+            request = submit_route_decision(
+                request_id,
+                tier,
+                config,
+                reason=reason,
+                confidence=confidence,
+            )
+        except KeyError:
+            return {"error": "route_not_found", "request_id": request_id}
+        except ValueError as exc:
+            return {"error": "route_rejected", "request_id": request_id, "message": str(exc)}
+        return asdict(request)
 
     @server.tool()
     def launch_codex(task: str, tier: Tier, workspace: str | None = None) -> dict:
         """Start a local Codex job with a preselected quota-conscious tier.
 
-        This tool accepts only a coding task, a fixed routing tier, and an optional workspace path.
-        It never accepts arbitrary shell commands. The local configuration enforces a maximum remote tier
-        and allowed workspace roots before anything is launched.
+        Use this only for ChatGPT-first dispatches. If a pending Codex-first route request exists, submit its route
+        decision instead so the already-waiting local launcher can preserve its project context and start Codex.
         """
         config = load_config()
         try:
