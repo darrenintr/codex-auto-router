@@ -1,17 +1,32 @@
+# codex-auto-router configuration
+# Model availability can vary by account. Change these names to match your Codex model picker.
+
 [routing]
-strategy = "heuristic"
+strategy = "heuristic"        # heuristic | ollama | hybrid
 include_git_context = true
 save_history = true
-max_auto_tier = "sol_medium"
+max_auto_tier = "sol_medium"  # local CLI auto-routing cap
+
 luna_low_max = 1
 luna_medium_max = 3
 terra_low_max = 6
 terra_medium_max = 9
+
 ollama_model = "qwen3:1.7b"
 ollama_url = "http://127.0.0.1:11434"
 
 [codex]
 binary = "codex"
+
+[bridge]
+# Empty means the directory where codex-auto-mcp is launched.
+default_workspace = ""
+# Add other repositories/directories ChatGPT is allowed to dispatch Codex into.
+allowed_roots = []
+# Hard safety cap for tasks coming from ChatGPT through MCP.
+max_remote_tier = "terra_medium"
+max_task_chars = 20000
+sandbox = "workspace-write"
 
 [routes.luna_low]
 model = "gpt-5.6-luna"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Auto Router"
+  short_description: "Route coding tasks to local Codex efficiently"
+  default_prompt: "Use $codex-auto-router to choose the cheapest sufficient Codex tier and start the task on my connected local Codex bridge."

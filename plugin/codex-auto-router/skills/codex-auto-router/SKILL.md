@@ -1,60 +1,52 @@
 ---
 name: codex-auto-router
-description: Route a coding task to the cheapest sufficient Codex model/reasoning tier and emit a ready-to-run local codex-auto command. Use when the user wants to save Codex quota, choose a Codex tier, or send a coding task to Codex efficiently.
+description: Route coding tasks from ChatGPT to a connected local Codex CLI using the cheapest sufficient model/reasoning tier. Use when the user @mentions Codex Auto Router, asks ChatGPT to start or hand off a coding task to Codex, wants to save Codex quota, or asks which Codex tier should handle a coding task.
 ---
 
 # Codex Auto Router
 
-Classify the user's coding task inside ChatGPT, then hand the decision to the local `codex-auto` CLI. The classification itself should not invoke Codex.
-
-## Goal
-
-Choose the cheapest tier that is likely to complete the task reliably. Do not select a stronger tier merely because the prompt is long or detailed.
+Classify the coding task in ChatGPT, then dispatch it through the connected local Codex Auto Router MCP app when that tool is available. The classification step must not start a separate Codex task.
 
 ## Routing ladder
 
-Use these tiers, from cheapest to strongest:
+Choose the cheapest tier likely to complete the task reliably:
 
-1. `luna_low` — trivial/localized edits, renames, formatting, tiny UI tweaks, simple lookups.
-2. `luna_medium` — ordinary features, straightforward bug fixes, routine tests, focused UI work.
-3. `terra_low` — multi-file changes, nontrivial debugging, build failures, moderate refactors.
-4. `terra_medium` — subtle regressions, lifecycle/rendering/concurrency problems, broad refactors or migrations.
-5. `sol_medium` — unusually difficult architecture or debugging that clearly exceeds Terra.
+1. `luna_low` — deterministic local edits, renames, formatting, tiny UI tweaks.
+2. `luna_medium` — normal features, focused bug fixes, routine tests and UI work.
+3. `terra_low` — multi-file work, build failures, nontrivial debugging, moderate refactors.
+4. `terra_medium` — subtle regressions, lifecycle/rendering/concurrency issues, broad refactors or migrations.
+5. `sol_medium` — unusually difficult architecture/debugging only.
 
-Default to `luna_low` or `luna_medium`. Prefer Terra only when there is concrete complexity. Treat `sol_medium` as a fallback, not a default.
+Default to Luna. Use Terra only for concrete complexity. Do not choose a tier merely because the prompt is long. Never invent an Astra tier.
 
-Never invent an Astra tier. Do not automatically route above `terra_medium` unless the user explicitly asks for the strongest route or the task has unusually difficult architecture/debugging requirements.
+Unless the user explicitly requests a stronger route, do not choose above `terra_medium`. The local bridge applies its own hard maximum tier regardless of this instruction.
 
-## Classification signals
+## Classify
 
-Consider the actual engineering work required, including:
+Consider:
 
-- Number of subsystems or files likely to be involved.
-- Whether the root cause is unknown.
-- Cross-platform behavior.
-- Lifecycle, rendering, concurrency, race-condition, memory, security, or performance complexity.
-- Architecture changes, migrations, or repository-wide refactors.
-- Whether the task is a tiny deterministic edit.
+- likely file/subsystem scope;
+- whether the root cause is unknown;
+- cross-platform behavior;
+- lifecycle, rendering, concurrency, race-condition, memory, security, or performance complexity;
+- architecture changes, migrations, or repository-wide refactors;
+- whether the requested change is small and deterministic.
 
-Do not use verbosity alone as a complexity signal.
+Do not expose chain-of-thought. Keep the user-facing reason to one sentence at most.
 
-If repository context is not available, classify from the user's task only. Do not ask the user to paste an entire repository just to choose a tier.
+## Dispatch
 
-## Output
+If the connected app exposes `launch_codex`:
 
-Return a short result containing:
+1. Choose one routing tier.
+2. Preserve the user's coding task faithfully; do not expand it into unrelated work.
+3. If the user supplied a workspace/path, pass it as `workspace`. Otherwise omit it so the local configured default is used.
+4. Call `launch_codex` with the task and chosen tier.
+5. On success, reply concisely with the selected tier and returned job id. Do not ask the user to copy a shell command.
 
-- Selected tier.
-- One-sentence reason.
-- A ready-to-run command.
+If the bridge rejects a workspace or tier, report that local safety policy blocked the dispatch. Do not work around the restriction.
 
-For a one-line task, use:
-
-```bash
-codex-auto --force-tier <tier> "<task>"
-```
-
-For a multi-line task, use stdin mode:
+If `launch_codex` is not available, do not claim that Codex started. Tell the user the one-time local bridge connection is not active and provide this fallback command:
 
 ```bash
 codex-auto --force-tier <tier> --stdin <<'CODEX_TASK'
@@ -62,4 +54,9 @@ codex-auto --force-tier <tier> --stdin <<'CODEX_TASK'
 CODEX_TASK
 ```
 
-Keep the explanation concise. Do not expose chain-of-thought or a long hidden scoring process.
+## Job follow-up
+
+- When the user asks whether a dispatched job is still running, call `get_codex_job`.
+- When the user asks what Codex is doing, why it failed, or requests output, call `get_codex_log`. Avoid repeatedly polling logs without a user request.
+- When the user asks to stop a job, call `cancel_codex_job`.
+- Never send arbitrary shell commands through the bridge; the bridge is intentionally limited to Codex task dispatch.

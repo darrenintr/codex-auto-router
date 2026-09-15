@@ -38,9 +38,19 @@ class CodexConfig:
 
 
 @dataclass(frozen=True)
+class BridgeConfig:
+    default_workspace: str = ""
+    allowed_roots: tuple[str, ...] = ()
+    max_remote_tier: str = "terra_medium"
+    max_task_chars: int = 20000
+    sandbox: str = "workspace-write"
+
+
+@dataclass(frozen=True)
 class AppConfig:
     routing: RoutingConfig = field(default_factory=RoutingConfig)
     codex: CodexConfig = field(default_factory=CodexConfig)
+    bridge: BridgeConfig = field(default_factory=BridgeConfig)
     routes: dict[str, ModelRoute] = field(
         default_factory=lambda: {
             "luna_low": ModelRoute("gpt-5.6-luna", "low"),
@@ -73,6 +83,16 @@ ollama_url = "http://127.0.0.1:11434"
 
 [codex]
 binary = "codex"
+
+[bridge]
+# Empty means the directory where codex-auto-mcp is launched.
+default_workspace = ""
+# Additional directories ChatGPT may dispatch Codex into.
+allowed_roots = []
+# Remote ChatGPT dispatches are capped here even if the Skill asks for more.
+max_remote_tier = "terra_medium"
+max_task_chars = 20000
+sandbox = "workspace-write"
 
 [routes.luna_low]
 model = "gpt-5.6-luna"
@@ -130,13 +150,26 @@ def load_config(path: Path | None = None) -> AppConfig:
     codex_raw = raw.get("codex", {})
     codex = replace(config.codex, binary=str(codex_raw.get("binary", config.codex.binary)))
 
+    bridge_raw = raw.get("bridge", {})
+    raw_roots = bridge_raw.get("allowed_roots", config.bridge.allowed_roots)
+    if isinstance(raw_roots, str):
+        raw_roots = [raw_roots]
+    bridge = replace(
+        config.bridge,
+        default_workspace=str(bridge_raw.get("default_workspace", config.bridge.default_workspace)),
+        allowed_roots=tuple(str(value) for value in raw_roots),
+        max_remote_tier=str(bridge_raw.get("max_remote_tier", config.bridge.max_remote_tier)),
+        max_task_chars=int(bridge_raw.get("max_task_chars", config.bridge.max_task_chars)),
+        sandbox=str(bridge_raw.get("sandbox", config.bridge.sandbox)),
+    )
+
     routes_raw = raw.get("routes", {})
     routes = {
         name: _route_from(routes_raw.get(name, {}), route)
         for name, route in config.routes.items()
     }
 
-    return AppConfig(routing=routing, codex=codex, routes=routes)
+    return AppConfig(routing=routing, codex=codex, bridge=bridge, routes=routes)
 
 
 def write_default_config(path: Path | None = None, *, overwrite: bool = False) -> Path:

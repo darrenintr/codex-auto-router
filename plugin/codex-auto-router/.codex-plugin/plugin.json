@@ -1,7 +1,7 @@
 {
   "name": "codex-auto-router",
-  "version": "0.2.0",
-  "description": "Choose the cheapest sufficient Codex model/reasoning tier from a coding task, then hand off to the local codex-auto CLI.",
+  "version": "0.3.0",
+  "description": "Classify coding tasks in ChatGPT and dispatch them to a connected local Codex CLI using the cheapest sufficient tier.",
   "author": {
     "name": "Darren",
     "url": "https://github.com/darrenintr"
@@ -9,20 +9,20 @@
   "homepage": "https://github.com/darrenintr/codex-auto-router",
   "repository": "https://github.com/darrenintr/codex-auto-router",
   "license": "MIT",
-  "keywords": ["codex", "router", "quota", "reasoning", "developer-tools"],
+  "keywords": ["codex", "router", "quota", "reasoning", "mcp", "developer-tools"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Auto Router",
-    "shortDescription": "Route coding tasks to the cheapest sufficient Codex tier.",
-    "longDescription": "Classify coding-task complexity in ChatGPT and produce a ready-to-run codex-auto hand-off command, so classification itself does not need a Codex task.",
+    "shortDescription": "Route ChatGPT coding tasks to local Codex with a quota-conscious tier.",
+    "longDescription": "ChatGPT classifies task complexity and, when the local MCP bridge is connected, starts the task directly in the local Codex CLI without spending a separate Codex turn on classification.",
     "developerName": "Darren",
     "category": "Developer Tools",
-    "capabilities": ["Routing", "Developer Tools"],
+    "capabilities": ["Routing", "Developer Tools", "MCP"],
     "websiteURL": "https://github.com/darrenintr/codex-auto-router",
     "defaultPrompt": [
-      "Route this coding task to the cheapest sufficient Codex tier.",
-      "Choose a Codex tier for this bug fix and give me the command.",
-      "Optimize this task for Codex quota usage."
+      "Route this coding task to the cheapest sufficient Codex tier and start it locally.",
+      "Hand this bug fix to my local Codex using an efficient tier.",
+      "Start this task in Codex without wasting quota on classification."
     ]
   }
 }
