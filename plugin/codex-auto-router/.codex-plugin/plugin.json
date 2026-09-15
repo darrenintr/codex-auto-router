@@ -1,6 +1,6 @@
 {
   "name": "codex-auto-router",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Classify coding tasks in ChatGPT and dispatch them to a connected local Codex CLI using the cheapest sufficient tier.",
   "author": {
     "name": "Darren",
