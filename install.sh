@@ -13,6 +13,7 @@ MAX_REMOTE_TIER="${CODEX_AUTO_MAX_REMOTE_TIER:-terra_medium}"
 SKIP_TUNNEL="${CODEX_AUTO_SKIP_TUNNEL:-0}"
 NONINTERACTIVE="${CODEX_AUTO_NONINTERACTIVE:-0}"
 INSTALL_CODEX_PLUGIN="${CODEX_AUTO_INSTALL_CODEX_PLUGIN:-1}"
+INSTALL_SHELL_ALIAS="${CODEX_AUTO_INSTALL_SHELL_ALIAS:-1}"
 
 log() { printf '\033[1;34m[codex-auto-router]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[codex-auto-router]\033[0m %s\n' "$*" >&2; }
@@ -95,6 +96,7 @@ install_router() {
   log "Installing/updating codex-auto-router from $REPO"
   pipx install --force "git+$REPO_URL"
   have codex-auto-mcp || die "codex-auto-mcp is not visible in PATH after installation"
+  have codex-route || die "codex-route is not visible in PATH after installation"
 }
 
 install_codex_plugin() {
@@ -137,6 +139,35 @@ raise SystemExit(1)
   fi
 
   log "Codex plugin registered. Restart any already-open Codex TUI before using @codex-auto-router."
+}
+
+install_shell_alias() {
+  if [[ "$INSTALL_SHELL_ALIAS" != "1" ]]; then
+    log "Shell alias installation skipped by CODEX_AUTO_INSTALL_SHELL_ALIAS=$INSTALL_SHELL_ALIAS"
+    return
+  fi
+
+  local rc marker='# >>> codex-auto-router codex-first >>>'
+  case "${SHELL:-}" in
+    */zsh) rc="$HOME/.zshrc" ;;
+    */fish)
+      warn "Fish shell detected. Add this manually: alias codex codex-route"
+      return
+      ;;
+    *) rc="$HOME/.bashrc" ;;
+  esac
+
+  touch "$rc"
+  if ! grep -Fq "$marker" "$rc" 2>/dev/null; then
+    cat >> "$rc" <<'EOF'
+
+# >>> codex-auto-router codex-first >>>
+# Interactive shell only. codex-route passes Codex subcommands/options through unchanged.
+alias codex='codex-route'
+# <<< codex-auto-router codex-first <<<
+EOF
+  fi
+  log "Installed transparent Codex-first launcher alias in $rc"
 }
 
 configure_router() {
@@ -308,6 +339,7 @@ main() {
   install_router
   install_codex_plugin
   configure_router
+  install_shell_alias
 
   if [[ "$SKIP_TUNNEL" == "1" ]]; then
     log "Tunnel setup skipped by CODEX_AUTO_SKIP_TUNNEL=1"
@@ -326,14 +358,16 @@ Setup complete.
 Local workspace: $WORKSPACE
 Remote tier cap: $MAX_REMOTE_TIER
 Tunnel profile: $PROFILE
-Codex plugin: codex-auto-router (restart Codex if it was already open)
+Codex-first launcher: alias codex='codex-route'
 
 Final account-side step:
   1. In the ChatGPT Connectors page that was opened, connect/enable the tunnel-backed MCP app.
   2. Install/enable the Codex Auto Router Skill/Plugin in ChatGPT.
-  3. For quota-saving routing, invoke @codex-auto-router from ChatGPT Web.
+  3. Open a new terminal (or source your shell rc), cd into a project, and run: codex
+  4. Enter the coding task. ChatGPT opens; send the copied @codex-auto-router handoff message.
+  5. ChatGPT submits the tier and the same terminal resumes into the real Codex CLI automatically.
 
-Local Codex also has the plugin installed, so it can appear in Codex's @ menu after restart; using it there routes inside Codex rather than moving classification to ChatGPT Web.
+Use 'codex --direct' to bypass web routing for one invocation. Codex subcommands such as 'codex plugin list' are passed through automatically.
 
 Service status:
   systemctl --user status codex-auto-router
@@ -343,7 +377,7 @@ EOF
 
 Core installation complete.
 
-The local Codex plugin has also been registered. Restart Codex if it was open.
+The Codex-first shell alias is installed. Open a new terminal (or source your shell rc).
 To finish ChatGPT pairing non-interactively, run the same one-command installer with:
   CONTROL_PLANE_TUNNEL_ID=tunnel_... CONTROL_PLANE_API_KEY=sk-... \\
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash
