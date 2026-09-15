@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from codex_auto_router.codex_first import build_interactive_command, is_passthrough_invocation
+from codex_auto_router.codex_first import (
+    build_handoff_message,
+    build_interactive_command,
+    is_passthrough_invocation,
+)
 
 
 def test_codex_subcommands_bypass_router():
@@ -27,3 +31,13 @@ def test_interactive_command_preserves_task_and_route():
     assert 'model="gpt-5.6-terra"' in command
     assert 'model_reasoning_effort="low"' in command
     assert command[-1] == "fix the rendering regression"
+
+
+def test_handoff_is_explicitly_routing_only():
+    handoff = build_handoff_message("route_deadbeef")
+    assert "@codex-auto-router" in handoff
+    assert "[CODEX_AUTO_ROUTE]" in handoff
+    assert "route_deadbeef" in handoff
+    assert "get_pending_codex_route" in handoff
+    assert "submit_codex_route" in handoff
+    assert "do not inspect, modify, or execute" in handoff
