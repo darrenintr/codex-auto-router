@@ -15,5 +15,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - run: bash -n install.sh scripts/setup-chatgpt.sh scripts/publish-github.sh
       - run: python -m pip install -e '.[dev]'
       - run: pytest
