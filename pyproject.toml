@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-auto-router"
-version = "0.3.1"
-description = "A quota-conscious model and reasoning router for the OpenAI Codex CLI."
+version = "0.4.0"
+description = "Route Codex tasks through ChatGPT to the cheapest sufficient model and reasoning tier."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [{name = "Darren"}]
-keywords = ["codex", "openai", "cli", "router", "reasoning", "developer-tools"]
+keywords = ["codex", "openai", "cli", "router", "reasoning", "developer-tools", "chatgpt", "mcp"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -30,6 +30,7 @@ dev = ["pytest>=8"]
 codex-auto = "codex_auto_router.cli:main"
 codex-auto-router = "codex_auto_router.cli:main"
 codex-auto-mcp = "codex_auto_router.mcp_server:main"
+codex-route = "codex_auto_router.codex_first:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
