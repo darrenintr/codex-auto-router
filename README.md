@@ -1,16 +1,67 @@
 # codex-auto-router
 
-Route coding tasks from ChatGPT to the cheapest sufficient Codex tier, then start the task on your own machine.
+Route **from Codex → ChatGPT Web → back to Codex** so the classification step does not consume a separate Codex turn.
 
-The normal daily UX is intentionally small:
+The v0.4 flow starts in your terminal, where the current project is already known:
 
 ```text
-@codex-auto-router fix the shared-element transition regression
+$ cd /path/to/project
+$ codex
+› fix the animation regression
 ```
 
-ChatGPT classifies the task in the conversation, chooses a quota-conscious tier, and dispatches it through a tightly scoped local MCP bridge. **The routing decision does not require a separate Codex turn.** Only the actual Codex job uses Codex usage.
+`codex-auto-router` captures the task plus current project/Git context, opens ChatGPT, and waits. In ChatGPT, send the handoff message (the installer/launcher copies it to your clipboard):
+
+```text
+@codex-auto-router route pending Codex request route_...
+```
+
+ChatGPT chooses the cheapest sufficient tier and submits only that route decision through the connected MCP bridge. The waiting terminal then resumes into the **real Codex CLI** with the selected model/reasoning effort and the original task.
 
 > This project is an independent wrapper/integration for Codex CLI. It does not bypass, alter, or increase OpenAI account limits.
+
+## Why Codex-first
+
+Starting from Codex solves the project-context problem automatically. The router already knows:
+
+- the current working directory,
+- Git root,
+- Git remote,
+- current branch,
+- changed/untracked file counts,
+- approximate diff size,
+- the exact task you typed.
+
+That context is exposed to ChatGPT only through the narrow routing MCP tools, then the selected tier is written back to the waiting local launcher.
+
+## Architecture
+
+```text
+Terminal / current project
+        |
+        |  codex
+        |  task + cwd + git context
+        v
+codex-route
+        |
+        |  create pending route request
+        |  open ChatGPT + wait
+        v
+ChatGPT Web
+        |
+        |  @codex-auto-router
+        |  get_pending_codex_route()
+        |  classify in ChatGPT
+        |  submit_codex_route()
+        v
+codex-route (same terminal)
+        |
+        |  selected model + reasoning
+        v
+real Codex CLI
+```
+
+There is no ChatGPT webpage scraping, cookie reuse, or generic remote shell. Because ChatGPT does not expose a consumer-Web-chat API for an external local process to silently post a message into your conversation, the Web handoff still requires one explicit ChatGPT send action.
 
 ## One-command install
 
@@ -22,22 +73,53 @@ curl -fsSL https://raw.githubusercontent.com/darrenintr/codex-auto-router/main/i
 
 The installer automatically:
 
-- installs missing Ubuntu/Debian dependencies (`python3`, `pipx`, `git`, `curl`, `unzip`, Node/npm),
-- installs Codex CLI if it is not already present,
-- installs or updates `codex-auto-router`,
+- installs missing Ubuntu/Debian dependencies,
+- installs Codex CLI if necessary,
+- installs/updates `codex-auto-router`,
+- installs the Codex Auto Router marketplace/plugin,
+- installs the `codex-route` launcher,
+- adds `alias codex='codex-route'` to the interactive shell config,
 - creates the router config,
-- defaults the allowed coding workspace to `~/Projects`,
-- caps ChatGPT remote routing at `terra_medium`,
-- downloads the latest official OpenAI Secure MCP `tunnel-client` release on Linux,
-- creates and validates the tunnel profile,
-- stores the runtime tunnel credentials in a user-only `0600` environment file,
-- installs a `systemd --user` service so the bridge stays available after login,
-- opens the OpenAI tunnel/API-key setup pages when credentials are needed,
+- caps remote routing at `terra_medium` by default,
+- installs/configures OpenAI Secure MCP Tunnel,
+- creates a `systemd --user` service,
+- opens the OpenAI tunnel/API-key pages when needed,
 - opens ChatGPT Connector settings for the final account-side authorization.
 
-The OpenAI account authorization cannot safely be skipped by an installer. If the tunnel ID/API key are not supplied yet, the same installer completes the local part and tells you how to resume pairing.
+After installation, open a new terminal or reload your shell config:
 
-For a non-interactive setup when you already have the tunnel credentials:
+```bash
+source ~/.bashrc
+```
+
+Then normal use is simply:
+
+```bash
+cd /path/to/project
+codex
+```
+
+Enter your coding task. The router opens ChatGPT and waits for the route decision.
+
+### Bypass routing for one invocation
+
+```bash
+codex --direct
+```
+
+Normal Codex subcommands/options are passed through automatically, for example:
+
+```bash
+codex plugin list
+codex login
+codex --model gpt-5.6-luna
+```
+
+## One-time ChatGPT pairing
+
+The local machine still requires an explicitly authorized MCP connection. The installer handles the local pieces, but the OpenAI account/tunnel authorization must be approved by the user.
+
+If you already have the tunnel credentials, setup can be non-interactive:
 
 ```bash
 CONTROL_PLANE_TUNNEL_ID=tunnel_... \
@@ -49,41 +131,27 @@ curl -fsSL https://raw.githubusercontent.com/darrenintr/codex-auto-router/main/i
 Useful overrides:
 
 ```bash
-CODEX_AUTO_WORKSPACE="$HOME/dev"              # allowed remote workspace
-CODEX_AUTO_MAX_REMOTE_TIER="terra_low"        # stricter quota cap
-CODEX_AUTO_SKIP_TUNNEL=1                       # install local router only
-CODEX_AUTO_NONINTERACTIVE=1                    # never prompt on /dev/tty
+CODEX_AUTO_MAX_REMOTE_TIER="terra_low"   # stricter route cap
+CODEX_AUTO_SKIP_TUNNEL=1                  # local components only
+CODEX_AUTO_INSTALL_SHELL_ALIAS=0          # do not replace interactive `codex`
+CODEX_AUTO_NONINTERACTIVE=1               # never prompt on /dev/tty
 ```
 
-After the one-time ChatGPT connector/plugin authorization, normal use is simply:
+## Daily Codex-first flow
+
+1. `cd` into the project you want Codex to work on.
+2. Run `codex`.
+3. Type the task into the lightweight pre-router prompt.
+4. ChatGPT opens automatically.
+5. Send the copied `@codex-auto-router route pending Codex request ...` message.
+6. ChatGPT reads the pending task/context, chooses a tier, and submits it.
+7. The original terminal automatically turns into the real Codex TUI with the task already supplied.
+
+The route request is stored locally under:
 
 ```text
-@codex-auto-router implement the settings screen and run the focused tests
+~/.local/state/codex-auto-router/routes/
 ```
-
-## Architecture
-
-```text
-ChatGPT Web
-    |
-    |  @codex-auto-router
-    |  classify task in ChatGPT
-    v
-luna_low / luna_medium / terra_low / terra_medium / sol_medium
-    |
-    |  launch_codex MCP tool
-    v
-OpenAI Secure MCP Tunnel
-    |
-    v
-codex-auto-mcp (your machine)
-    |
-    |  validates tier + workspace + task length
-    v
-codex exec --sandbox workspace-write ...
-```
-
-There is no ChatGPT webpage scraping, cookie reuse, or generic remote shell.
 
 ## Routing ladder
 
@@ -95,148 +163,57 @@ There is no ChatGPT webpage scraping, cookie reuse, or generic remote shell.
 | `terra_medium` | `gpt-5.6-terra` | medium | subtle regressions, broad refactors, lifecycle/concurrency issues |
 | `sol_medium` | `gpt-5.6-sol` | medium | unusually difficult architecture/debugging fallback |
 
-Model availability can vary by account. All routes are configurable.
-
-## Manual install
-
-If you prefer not to use the installer, the local component requires Python 3.11+ and Codex CLI.
-
-```bash
-git clone https://github.com/darrenintr/codex-auto-router.git
-cd codex-auto-router
-pipx install .
-codex-auto --init-config
-```
-
-Or with `uv`:
-
-```bash
-uv tool install .
-codex-auto --init-config
-```
-
-The config is stored at:
-
-```text
-~/.config/codex-auto-router/config.toml
-```
-
-## One-time ChatGPT pairing
-
-A Skill cannot directly grant itself permission to execute code on a user's laptop. The supported bridge is a local MCP server connected to ChatGPT through OpenAI Secure MCP Tunnel.
-
-The one-command installer handles the local setup and tunnel profile. The user still has to explicitly create/authorize the OpenAI tunnel/runtime credential and enable the connector/plugin in ChatGPT.
-
-Manual pairing remains available:
-
-```bash
-./scripts/setup-chatgpt.sh tunnel_...
-```
-
-Then either run the tunnel in the foreground:
-
-```bash
-tunnel-client run --profile codex-auto-router
-```
-
-or use the installed user service when configured by `install.sh`:
-
-```bash
-systemctl --user status codex-auto-router
-journalctl --user -u codex-auto-router -n 100
-```
-
-See [`docs/secure-mcp-tunnel.md`](docs/secure-mcp-tunnel.md) for the complete setup.
+Model availability can vary by account. All route mappings are configurable.
 
 ## Local safety controls
 
-The bridge intentionally exposes only four tools:
+The MCP bridge exposes only scoped routing/dispatch tools:
 
-- `launch_codex(task, tier, workspace?)`
+- `get_pending_codex_route(request_id?)`
+- `submit_codex_route(request_id, tier, reason?, confidence?)`
+- `launch_codex(task, tier, workspace?)` for the older ChatGPT-first flow
 - `get_codex_job(job_id)`
 - `get_codex_log(job_id, lines?)`
 - `cancel_codex_job(job_id)`
 
-It does **not** accept arbitrary shell commands.
+It does **not** expose arbitrary shell execution.
 
-Configure remote limits:
+The local bridge enforces a tier cap:
 
 ```toml
 [bridge]
-default_workspace = "/home/you/Projects"
-allowed_roots = ["/home/you/Projects"]
 max_remote_tier = "terra_medium"
-max_task_chars = 20000
-sandbox = "workspace-write"
 ```
 
-Remote dispatches are rejected when they exceed `max_remote_tier` or target a path outside the allowed roots.
+So even if ChatGPT requests a stronger tier, the local bridge rejects it.
 
-## CLI-only mode
+## ChatGPT handoff settings
 
-The original local router remains available even without ChatGPT:
+```toml
+[chatgpt]
+url = "https://chatgpt.com/"
+open_browser = true
+copy_handoff = true
+timeout_seconds = 300
+fallback = "heuristic"   # heuristic | cancel
+```
+
+If ChatGPT does not submit a route before the timeout, the default behavior is to use the local heuristic router rather than block forever.
+
+## CLI-only router
+
+The original local router is still available:
 
 ```bash
 codex-auto "fix the padding of the video card"
 ```
 
-Preview the route without launching Codex:
+Preview a local route without launching Codex:
 
 ```bash
 codex-auto --dry-run --explain \
   "refactor the shared-element transition and find the lifecycle regression"
 ```
-
-Force a route:
-
-```bash
-codex-auto --force-tier terra_low "investigate the Android build regression"
-```
-
-Multi-line input:
-
-```bash
-codex-auto --force-tier terra_low --stdin <<'CODEX_TASK'
-Investigate the Android build regression.
-Keep the change minimal and run targeted tests.
-CODEX_TASK
-```
-
-## Optional local classifier
-
-CLI-only routing defaults to deterministic heuristics. It can optionally use Ollama:
-
-```bash
-ollama pull qwen3:1.7b
-```
-
-Then:
-
-```toml
-[routing]
-strategy = "hybrid"
-ollama_model = "qwen3:1.7b"
-```
-
-This local classifier is separate from the ChatGPT Plugin flow.
-
-## Job state
-
-Remote-dispatched jobs are stored under:
-
-```text
-~/.local/state/codex-auto-router/jobs/
-```
-
-Each job keeps metadata, its task, a Codex log, and exit status locally.
-
-The CLI router's privacy-conscious history is stored separately at:
-
-```text
-~/.local/state/codex-auto-router/history.jsonl
-```
-
-History stores a SHA-256 hash and routing metadata rather than prompt contents.
 
 ## Plugin / Skill source
 
@@ -246,13 +223,13 @@ The ChatGPT-side component lives at:
 plugin/codex-auto-router/
 ```
 
-The standalone Skill is:
+The Skill is:
 
 ```text
 plugin/codex-auto-router/skills/codex-auto-router/
 ```
 
-See [`docs/chatgpt-plugin.md`](docs/chatgpt-plugin.md) for the dispatch behavior.
+When invoked for a pending Codex-first request, the Skill must use `get_pending_codex_route` + `submit_codex_route`; it must **not** call `launch_codex` for the same request, because the local launcher is already waiting to resume.
 
 ## Development
 
