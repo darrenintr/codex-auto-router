@@ -1,0 +1,34 @@
+[routing]
+strategy = "heuristic"
+include_git_context = true
+save_history = true
+max_auto_tier = "sol_medium"
+luna_low_max = 1
+luna_medium_max = 3
+terra_low_max = 6
+terra_medium_max = 9
+ollama_model = "qwen3:1.7b"
+ollama_url = "http://127.0.0.1:11434"
+
+[codex]
+binary = "codex"
+
+[routes.luna_low]
+model = "gpt-5.6-luna"
+effort = "low"
+
+[routes.luna_medium]
+model = "gpt-5.6-luna"
+effort = "medium"
+
+[routes.terra_low]
+model = "gpt-5.6-terra"
+effort = "low"
+
+[routes.terra_medium]
+model = "gpt-5.6-terra"
+effort = "medium"
+
+[routes.sol_medium]
+model = "gpt-5.6-sol"
+effort = "medium"

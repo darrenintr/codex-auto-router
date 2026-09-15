@@ -1,0 +1,28 @@
+{
+  "name": "codex-auto-router",
+  "version": "0.2.0",
+  "description": "Choose the cheapest sufficient Codex model/reasoning tier from a coding task, then hand off to the local codex-auto CLI.",
+  "author": {
+    "name": "Darren",
+    "url": "https://github.com/darrenintr"
+  },
+  "homepage": "https://github.com/darrenintr/codex-auto-router",
+  "repository": "https://github.com/darrenintr/codex-auto-router",
+  "license": "MIT",
+  "keywords": ["codex", "router", "quota", "reasoning", "developer-tools"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Auto Router",
+    "shortDescription": "Route coding tasks to the cheapest sufficient Codex tier.",
+    "longDescription": "Classify coding-task complexity in ChatGPT and produce a ready-to-run codex-auto hand-off command, so classification itself does not need a Codex task.",
+    "developerName": "Darren",
+    "category": "Developer Tools",
+    "capabilities": ["Routing", "Developer Tools"],
+    "websiteURL": "https://github.com/darrenintr/codex-auto-router",
+    "defaultPrompt": [
+      "Route this coding task to the cheapest sufficient Codex tier.",
+      "Choose a Codex tier for this bug fix and give me the command.",
+      "Optimize this task for Codex quota usage."
+    ]
+  }
+}
