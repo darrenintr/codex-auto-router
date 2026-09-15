@@ -8,7 +8,7 @@ import sys
 import webbrowser
 
 from .config import DEFAULT_CONFIG_PATH, TIER_ORDER, load_config
-from .git_context import collect_git_context
+from .git_context import GitContext, collect_git_context
 from .route_requests import cancel_route_request, create_route_request, wait_for_route_decision
 from .router import decide
 
@@ -128,7 +128,7 @@ def build_interactive_command(binary: str, model: str, effort: str, task: str) -
     ]
 
 
-def _fallback_tier(task: str, config, git) -> str:
+def _fallback_tier(task: str, config, git: GitContext) -> str:
     decision = decide(task, config, git, strategy="heuristic")
     tier = decision.tier
     cap = config.bridge.max_remote_tier if config.bridge.max_remote_tier in TIER_ORDER else "terra_medium"
@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     workspace = Path.cwd().resolve()
-    git = collect_git_context(workspace) if config.routing.include_git_context else collect_git_context(Path("/__codex_auto_router_no_repo__"))
+    git = collect_git_context(workspace) if config.routing.include_git_context else GitContext()
     request = create_route_request(task, workspace, git)
     handoff = f"@codex-auto-router route pending Codex request {request.request_id}"
 
@@ -204,6 +204,9 @@ def main(argv: list[str] | None = None) -> int:
             f"[codex-auto-router] ChatGPT routing timed out; local fallback selected {tier}",
             file=sys.stderr,
         )
+    except RuntimeError as exc:
+        print(f"[codex-auto-router] routing stopped: {exc}", file=sys.stderr)
+        return 4
 
     route = config.routes[tier]
     try:
