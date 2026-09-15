@@ -2,15 +2,64 @@
 
 Route coding tasks from ChatGPT to the cheapest sufficient Codex tier, then start the task on your own machine.
 
-The v0.3 flow is designed around a simple daily UX:
+The normal daily UX is intentionally small:
 
 ```text
 @codex-auto-router fix the shared-element transition regression
 ```
 
-ChatGPT classifies the task in the conversation, chooses a tier, and dispatches it through a tightly scoped local MCP bridge. **The routing decision does not require a separate Codex turn.** Only the Codex job itself uses Codex usage.
+ChatGPT classifies the task in the conversation, chooses a quota-conscious tier, and dispatches it through a tightly scoped local MCP bridge. **The routing decision does not require a separate Codex turn.** Only the actual Codex job uses Codex usage.
 
 > This project is an independent wrapper/integration for Codex CLI. It does not bypass, alter, or increase OpenAI account limits.
+
+## One-command install
+
+Ubuntu/Debian is the primary supported automatic setup path.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/darrenintr/codex-auto-router/main/install.sh | bash
+```
+
+The installer automatically:
+
+- installs missing Ubuntu/Debian dependencies (`python3`, `pipx`, `git`, `curl`, `unzip`, Node/npm),
+- installs Codex CLI if it is not already present,
+- installs or updates `codex-auto-router`,
+- creates the router config,
+- defaults the allowed coding workspace to `~/Projects`,
+- caps ChatGPT remote routing at `terra_medium`,
+- downloads the latest official OpenAI Secure MCP `tunnel-client` release on Linux,
+- creates and validates the tunnel profile,
+- stores the runtime tunnel credentials in a user-only `0600` environment file,
+- installs a `systemd --user` service so the bridge stays available after login,
+- opens the OpenAI tunnel/API-key setup pages when credentials are needed,
+- opens ChatGPT Connector settings for the final account-side authorization.
+
+The OpenAI account authorization cannot safely be skipped by an installer. If the tunnel ID/API key are not supplied yet, the same installer completes the local part and tells you how to resume pairing.
+
+For a non-interactive setup when you already have the tunnel credentials:
+
+```bash
+CONTROL_PLANE_TUNNEL_ID=tunnel_... \
+CONTROL_PLANE_API_KEY=sk-... \
+CODEX_AUTO_WORKSPACE="$HOME/Projects" \
+curl -fsSL https://raw.githubusercontent.com/darrenintr/codex-auto-router/main/install.sh | bash
+```
+
+Useful overrides:
+
+```bash
+CODEX_AUTO_WORKSPACE="$HOME/dev"              # allowed remote workspace
+CODEX_AUTO_MAX_REMOTE_TIER="terra_low"        # stricter quota cap
+CODEX_AUTO_SKIP_TUNNEL=1                       # install local router only
+CODEX_AUTO_NONINTERACTIVE=1                    # never prompt on /dev/tty
+```
+
+After the one-time ChatGPT connector/plugin authorization, normal use is simply:
+
+```text
+@codex-auto-router implement the settings screen and run the focused tests
+```
 
 ## Architecture
 
@@ -48,9 +97,9 @@ There is no ChatGPT webpage scraping, cookie reuse, or generic remote shell.
 
 Model availability can vary by account. All routes are configurable.
 
-## Install the local component
+## Manual install
 
-Requires Python 3.11+ and Codex CLI.
+If you prefer not to use the installer, the local component requires Python 3.11+ and Codex CLI.
 
 ```bash
 git clone https://github.com/darrenintr/codex-auto-router.git
@@ -74,34 +123,30 @@ The config is stored at:
 
 ## One-time ChatGPT pairing
 
-A Skill cannot directly execute shell commands on a user's laptop. The supported bridge is a local MCP server connected to ChatGPT through OpenAI Secure MCP Tunnel.
+A Skill cannot directly grant itself permission to execute code on a user's laptop. The supported bridge is a local MCP server connected to ChatGPT through OpenAI Secure MCP Tunnel.
 
-1. Install the supported `tunnel-client` from OpenAI's Tunnels settings page.
-2. Create a tunnel and runtime API key with Tunnels Read + Use permissions.
-3. Export the runtime key as `CONTROL_PLANE_API_KEY`.
-4. Run:
+The one-command installer handles the local setup and tunnel profile. The user still has to explicitly create/authorize the OpenAI tunnel/runtime credential and enable the connector/plugin in ChatGPT.
+
+Manual pairing remains available:
 
 ```bash
 ./scripts/setup-chatgpt.sh tunnel_...
 ```
 
-5. Start the tunnel profile:
+Then either run the tunnel in the foreground:
 
 ```bash
 tunnel-client run --profile codex-auto-router
 ```
 
-6. While it is healthy, add the tunnel as a ChatGPT connector/app in ChatGPT settings and install the Codex Auto Router plugin from this repository/workspace marketplace.
+or use the installed user service when configured by `install.sh`:
 
-See [`docs/secure-mcp-tunnel.md`](docs/secure-mcp-tunnel.md) for the complete setup and the managed-runtime option.
-
-After this one-time pairing, normal use is:
-
-```text
-@codex-auto-router implement the settings screen and run the focused tests
+```bash
+systemctl --user status codex-auto-router
+journalctl --user -u codex-auto-router -n 100
 ```
 
-If the connected `launch_codex` tool is available, the Skill dispatches automatically instead of asking you to copy a terminal command.
+See [`docs/secure-mcp-tunnel.md`](docs/secure-mcp-tunnel.md) for the complete setup.
 
 ## Local safety controls
 
@@ -118,8 +163,8 @@ Configure remote limits:
 
 ```toml
 [bridge]
-default_workspace = "/home/you/projects"
-allowed_roots = ["/home/you/projects"]
+default_workspace = "/home/you/Projects"
+allowed_roots = ["/home/you/Projects"]
 max_remote_tier = "terra_medium"
 max_task_chars = 20000
 sandbox = "workspace-write"
@@ -185,7 +230,7 @@ Remote-dispatched jobs are stored under:
 
 Each job keeps metadata, its task, a Codex log, and exit status locally.
 
-The CLI router's privacy-conscious history is still stored separately at:
+The CLI router's privacy-conscious history is stored separately at:
 
 ```text
 ~/.local/state/codex-auto-router/history.jsonl
@@ -215,6 +260,7 @@ See [`docs/chatgpt-plugin.md`](docs/chatgpt-plugin.md) for the dispatch behavior
 pip install -e '.[dev]'
 pytest
 python -m compileall -q src tests
+bash -n install.sh scripts/setup-chatgpt.sh
 ```
 
 ## License
