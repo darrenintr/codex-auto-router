@@ -137,6 +137,15 @@ def _fallback_tier(task: str, config, git: GitContext) -> str:
     return tier
 
 
+def build_handoff_message(request_id: str) -> str:
+    return (
+        "@codex-auto-router [CODEX_AUTO_ROUTE] "
+        f"route pending request {request_id}. "
+        "Routing only: use get_pending_codex_route and submit_codex_route; "
+        "do not inspect, modify, or execute the coding task in this chat."
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     config = load_config(DEFAULT_CONFIG_PATH)
@@ -162,7 +171,7 @@ def main(argv: list[str] | None = None) -> int:
     workspace = Path.cwd().resolve()
     git = collect_git_context(workspace) if config.routing.include_git_context else GitContext()
     request = create_route_request(task, workspace, git)
-    handoff = f"@codex-auto-router route pending Codex request {request.request_id}"
+    handoff = build_handoff_message(request.request_id)
 
     copied = config.chatgpt.copy_handoff and _copy_to_clipboard(handoff)
     if config.chatgpt.open_browser:
@@ -177,6 +186,12 @@ def main(argv: list[str] | None = None) -> int:
         f"[codex-auto-router] in ChatGPT send: {handoff}",
         file=sys.stderr,
     )
+    if not git.is_repo:
+        print(
+            "[codex-auto-router] warning: current directory is not inside a Git repository; "
+            "the exact directory will still be preserved, but Git context is unavailable",
+            file=sys.stderr,
+        )
     if copied:
         print("[codex-auto-router] handoff message copied to clipboard", file=sys.stderr)
 
