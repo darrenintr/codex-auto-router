@@ -12,6 +12,8 @@ class GitContext:
     untracked_files: int = 0
     diff_lines: int = 0
     repo_root: str | None = None
+    branch: str | None = None
+    remote: str | None = None
 
 
 def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -53,6 +55,11 @@ def collect_git_context(cwd: Path | None = None) -> GitContext:
                     total += int(value)
         return total
 
+    branch_result = _run_git(["branch", "--show-current"], cwd)
+    branch = branch_result.stdout.strip() if branch_result.returncode == 0 else ""
+    remote_result = _run_git(["remote", "get-url", "origin"], cwd)
+    remote = remote_result.stdout.strip() if remote_result.returncode == 0 else ""
+
     diff_lines = count_numstat(unstaged.stdout) + count_numstat(staged.stdout)
     return GitContext(
         is_repo=True,
@@ -60,4 +67,6 @@ def collect_git_context(cwd: Path | None = None) -> GitContext:
         untracked_files=untracked,
         diff_lines=diff_lines,
         repo_root=root or None,
+        branch=branch or None,
+        remote=remote or None,
     )
