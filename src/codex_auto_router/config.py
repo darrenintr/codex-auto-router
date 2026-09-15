@@ -47,10 +47,20 @@ class BridgeConfig:
 
 
 @dataclass(frozen=True)
+class ChatGPTConfig:
+    url: str = "https://chatgpt.com/"
+    open_browser: bool = True
+    copy_handoff: bool = True
+    timeout_seconds: int = 300
+    fallback: str = "heuristic"  # heuristic | cancel
+
+
+@dataclass(frozen=True)
 class AppConfig:
     routing: RoutingConfig = field(default_factory=RoutingConfig)
     codex: CodexConfig = field(default_factory=CodexConfig)
     bridge: BridgeConfig = field(default_factory=BridgeConfig)
+    chatgpt: ChatGPTConfig = field(default_factory=ChatGPTConfig)
     routes: dict[str, ModelRoute] = field(
         default_factory=lambda: {
             "luna_low": ModelRoute("gpt-5.6-luna", "low"),
@@ -89,10 +99,19 @@ binary = "codex"
 default_workspace = ""
 # Additional directories ChatGPT may dispatch Codex into.
 allowed_roots = []
-# Remote ChatGPT dispatches are capped here even if the Skill asks for more.
+# Remote ChatGPT route decisions and dispatches are capped here.
 max_remote_tier = "terra_medium"
 max_task_chars = 20000
 sandbox = "workspace-write"
+
+[chatgpt]
+# Codex-first flow: local launcher opens ChatGPT, then waits for the Skill to submit a route.
+url = "https://chatgpt.com/"
+open_browser = true
+copy_handoff = true
+timeout_seconds = 300
+# If ChatGPT does not answer in time, either route locally or cancel.
+fallback = "heuristic"        # heuristic | cancel
 
 [routes.luna_low]
 model = "gpt-5.6-luna"
@@ -163,13 +182,23 @@ def load_config(path: Path | None = None) -> AppConfig:
         sandbox=str(bridge_raw.get("sandbox", config.bridge.sandbox)),
     )
 
+    chatgpt_raw = raw.get("chatgpt", {})
+    chatgpt = replace(
+        config.chatgpt,
+        url=str(chatgpt_raw.get("url", config.chatgpt.url)),
+        open_browser=bool(chatgpt_raw.get("open_browser", config.chatgpt.open_browser)),
+        copy_handoff=bool(chatgpt_raw.get("copy_handoff", config.chatgpt.copy_handoff)),
+        timeout_seconds=int(chatgpt_raw.get("timeout_seconds", config.chatgpt.timeout_seconds)),
+        fallback=str(chatgpt_raw.get("fallback", config.chatgpt.fallback)),
+    )
+
     routes_raw = raw.get("routes", {})
     routes = {
         name: _route_from(routes_raw.get(name, {}), route)
         for name, route in config.routes.items()
     }
 
-    return AppConfig(routing=routing, codex=codex, bridge=bridge, routes=routes)
+    return AppConfig(routing=routing, codex=codex, bridge=bridge, chatgpt=chatgpt, routes=routes)
 
 
 def write_default_config(path: Path | None = None, *, overwrite: bool = False) -> Path:
