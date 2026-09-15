@@ -12,6 +12,7 @@ WORKSPACE="${CODEX_AUTO_WORKSPACE:-$HOME/Projects}"
 MAX_REMOTE_TIER="${CODEX_AUTO_MAX_REMOTE_TIER:-terra_medium}"
 SKIP_TUNNEL="${CODEX_AUTO_SKIP_TUNNEL:-0}"
 NONINTERACTIVE="${CODEX_AUTO_NONINTERACTIVE:-0}"
+INSTALL_CODEX_PLUGIN="${CODEX_AUTO_INSTALL_CODEX_PLUGIN:-1}"
 
 log() { printf '\033[1;34m[codex-auto-router]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[codex-auto-router]\033[0m %s\n' "$*" >&2; }
@@ -94,6 +95,48 @@ install_router() {
   log "Installing/updating codex-auto-router from $REPO"
   pipx install --force "git+$REPO_URL"
   have codex-auto-mcp || die "codex-auto-mcp is not visible in PATH after installation"
+}
+
+install_codex_plugin() {
+  if [[ "$INSTALL_CODEX_PLUGIN" != "1" ]]; then
+    log "Codex plugin installation skipped by CODEX_AUTO_INSTALL_CODEX_PLUGIN=$INSTALL_CODEX_PLUGIN"
+    return
+  fi
+
+  if ! codex plugin --help >/dev/null 2>&1; then
+    warn "This Codex CLI build does not expose 'codex plugin'; skipping Codex-side @mention installation."
+    return
+  fi
+
+  log "Adding Codex Auto Router marketplace to Codex"
+  if ! codex plugin marketplace add "$REPO" --ref main >/dev/null; then
+    warn "Could not add the Codex Auto Router marketplace automatically."
+    warn "Run manually: codex plugin marketplace add $REPO --ref main"
+    return
+  fi
+
+  if codex plugin list --json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+for item in data.get("installed", []):
+    if item.get("name") == "codex-auto-router" and item.get("marketplaceName") == "codex-auto-router":
+        raise SystemExit(0)
+raise SystemExit(1)
+'; then
+    log "Codex Auto Router plugin is already installed in Codex"
+  else
+    log "Installing Codex Auto Router plugin into Codex"
+    if ! codex plugin add codex-auto-router@codex-auto-router; then
+      warn "Marketplace was added, but the Codex plugin install failed."
+      warn "Run manually: codex plugin add codex-auto-router@codex-auto-router"
+      return
+    fi
+  fi
+
+  log "Codex plugin registered. Restart any already-open Codex TUI before using @codex-auto-router."
 }
 
 configure_router() {
@@ -263,6 +306,7 @@ main() {
 
   install_codex
   install_router
+  install_codex_plugin
   configure_router
 
   if [[ "$SKIP_TUNNEL" == "1" ]]; then
@@ -282,11 +326,14 @@ Setup complete.
 Local workspace: $WORKSPACE
 Remote tier cap: $MAX_REMOTE_TIER
 Tunnel profile: $PROFILE
+Codex plugin: codex-auto-router (restart Codex if it was already open)
 
 Final account-side step:
   1. In the ChatGPT Connectors page that was opened, connect/enable the tunnel-backed MCP app.
-  2. Install/enable the Codex Auto Router Skill/Plugin.
-  3. Use: @codex-auto-router <your coding task>
+  2. Install/enable the Codex Auto Router Skill/Plugin in ChatGPT.
+  3. For quota-saving routing, invoke @codex-auto-router from ChatGPT Web.
+
+Local Codex also has the plugin installed, so it can appear in Codex's @ menu after restart; using it there routes inside Codex rather than moving classification to ChatGPT Web.
 
 Service status:
   systemctl --user status codex-auto-router
@@ -296,6 +343,7 @@ EOF
 
 Core installation complete.
 
+The local Codex plugin has also been registered. Restart Codex if it was open.
 To finish ChatGPT pairing non-interactively, run the same one-command installer with:
   CONTROL_PLANE_TUNNEL_ID=tunnel_... CONTROL_PLANE_API_KEY=sk-... \\
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash
