@@ -1,6 +1,6 @@
 {
   "name": "codex-auto-router",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Start from Codex, classify the pending task in ChatGPT, then route it back to the cheapest sufficient Codex tier.",
   "author": {
     "name": "Darren",
