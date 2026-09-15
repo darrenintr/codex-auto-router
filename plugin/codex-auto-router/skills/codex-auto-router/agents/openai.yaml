@@ -1,4 +1,4 @@
 interface:
   display_name: "Codex Auto Router"
-  short_description: "Route coding tasks to local Codex efficiently"
-  default_prompt: "Use $codex-auto-router to choose the cheapest sufficient Codex tier and start the task on my connected local Codex bridge."
+  short_description: "Route pending local Codex tasks through ChatGPT."
+  default_prompt: "Use $codex-auto-router to find my pending local Codex request, choose the cheapest sufficient tier, and submit the route so the waiting Codex launcher can resume."
