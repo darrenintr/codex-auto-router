@@ -220,7 +220,7 @@ for pattern, repl in replacements.items():
         raise SystemExit(f"could not update {pattern!r} in {p}")
 p.write_text(text, encoding="utf-8")
 PY
-  log "Workspace allowed for ChatGPT dispatch: $WORKSPACE"
+  log "ChatGPT-first fallback workspace: $WORKSPACE"
   log "Maximum remote tier: $MAX_REMOTE_TIER"
 }
 
@@ -264,6 +264,17 @@ collect_tunnel_credentials() {
   TUNNEL_ID="${CONTROL_PLANE_TUNNEL_ID:-}"
   API_KEY="${CONTROL_PLANE_API_KEY:-}"
 
+  if [[ (-z "$TUNNEL_ID" || -z "$API_KEY") && -r "$ENV_FILE" ]]; then
+    local saved_tunnel_id saved_api_key
+    saved_tunnel_id="$(grep -E '^CONTROL_PLANE_TUNNEL_ID=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)"
+    saved_api_key="$(grep -E '^CONTROL_PLANE_API_KEY=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)"
+    TUNNEL_ID="${TUNNEL_ID:-$saved_tunnel_id}"
+    API_KEY="${API_KEY:-$saved_api_key}"
+    if [[ -n "$TUNNEL_ID" && -n "$API_KEY" ]]; then
+      log "Reusing saved Secure MCP Tunnel credentials from $ENV_FILE"
+    fi
+  fi
+
   if [[ -z "$TUNNEL_ID" ]]; then
     log "A one-time Secure MCP Tunnel ID is required. Opening the OpenAI Tunnels page."
     open_url "https://platform.openai.com/settings/organization/tunnels"
@@ -289,8 +300,9 @@ collect_tunnel_credentials() {
 configure_tunnel() {
   local mcp_command
   mcp_command="$(command -v codex-auto-mcp)"
-  log "Creating Secure MCP Tunnel profile: $PROFILE"
+  log "Creating/updating Secure MCP Tunnel profile: $PROFILE"
   tunnel-client init \
+    --force \
     --sample sample_mcp_stdio_local \
     --profile "$PROFILE" \
     --tunnel-id "$TUNNEL_ID" \
@@ -334,7 +346,8 @@ RestartSec=5
 WantedBy=default.target
 UNIT
   systemctl --user daemon-reload
-  systemctl --user enable --now codex-auto-router.service
+  systemctl --user enable codex-auto-router.service >/dev/null
+  systemctl --user restart codex-auto-router.service
   if systemctl --user is-active --quiet codex-auto-router.service; then
     log "Background tunnel service is active"
   else
@@ -382,7 +395,7 @@ main() {
 
 Setup complete.
 
-Local workspace: $WORKSPACE
+ChatGPT-first fallback workspace: $WORKSPACE
 Remote tier cap: $MAX_REMOTE_TIER
 Tunnel profile: $PROFILE
 Codex-first launcher: alias codex='codex-route'
@@ -408,7 +421,7 @@ Core installation complete.
 
 The Codex-first shell alias is installed. Open a new terminal (or source your shell rc).
 To finish ChatGPT pairing non-interactively, run the same one-command installer with:
-  CONTROL_PLANE_TUNNEL_ID=tunnel_... CONTROL_PLANE_API_KEY=sk-... \\
+  CONTROL_PLANE_TUNNEL_ID=tunnel_... CONTROL_PLANE_API_KEY=sk-... \
   curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash
 EOF
   fi
