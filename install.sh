@@ -309,7 +309,9 @@ configure_tunnel() {
     --mcp-command "$mcp_command"
 
   log "Validating tunnel configuration"
-  tunnel-client doctor --profile "$PROFILE" --explain
+  # Doctor starts its own temporary health listener. Use an ephemeral port so a
+  # previously running tunnel daemon on 127.0.0.1:8080 cannot make reinstall fail.
+  tunnel-client doctor --profile "$PROFILE" --health.listen-addr 127.0.0.1:0 --explain
 
   umask 077
   cat > "$ENV_FILE" <<ENV_EOF
