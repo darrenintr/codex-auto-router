@@ -12,7 +12,10 @@ WORKSPACE="${CODEX_AUTO_WORKSPACE:-$HOME/Projects}"
 MAX_REMOTE_TIER="${CODEX_AUTO_MAX_REMOTE_TIER:-terra_medium}"
 SKIP_TUNNEL="${CODEX_AUTO_SKIP_TUNNEL:-0}"
 NONINTERACTIVE="${CODEX_AUTO_NONINTERACTIVE:-0}"
-INSTALL_CODEX_PLUGIN="${CODEX_AUTO_INSTALL_CODEX_PLUGIN:-1}"
+# v0.4 is Codex-first but ChatGPT-routed. Installing the routing Skill inside
+# Codex itself is opt-in because doing so spends Codex usage on classification.
+INSTALL_CODEX_PLUGIN="${CODEX_AUTO_INSTALL_CODEX_PLUGIN:-0}"
+REMOVE_LEGACY_CODEX_PLUGIN="${CODEX_AUTO_REMOVE_LEGACY_CODEX_PLUGIN:-1}"
 INSTALL_SHELL_ALIAS="${CODEX_AUTO_INSTALL_SHELL_ALIAS:-1}"
 
 log() { printf '\033[1;34m[codex-auto-router]\033[0m %s\n' "$*"; }
@@ -99,25 +102,8 @@ install_router() {
   have codex-route || die "codex-route is not visible in PATH after installation"
 }
 
-install_codex_plugin() {
-  if [[ "$INSTALL_CODEX_PLUGIN" != "1" ]]; then
-    log "Codex plugin installation skipped by CODEX_AUTO_INSTALL_CODEX_PLUGIN=$INSTALL_CODEX_PLUGIN"
-    return
-  fi
-
-  if ! codex plugin --help >/dev/null 2>&1; then
-    warn "This Codex CLI build does not expose 'codex plugin'; skipping Codex-side @mention installation."
-    return
-  fi
-
-  log "Adding Codex Auto Router marketplace to Codex"
-  if ! codex plugin marketplace add "$REPO" --ref main >/dev/null; then
-    warn "Could not add the Codex Auto Router marketplace automatically."
-    warn "Run manually: codex plugin marketplace add $REPO --ref main"
-    return
-  fi
-
-  if codex plugin list --json 2>/dev/null | python3 -c '
+codex_router_plugin_is_installed() {
+  codex plugin list --json 2>/dev/null | python3 -c '
 import json, sys
 try:
     data = json.load(sys.stdin)
@@ -127,7 +113,47 @@ for item in data.get("installed", []):
     if item.get("name") == "codex-auto-router" and item.get("marketplaceName") == "codex-auto-router":
         raise SystemExit(0)
 raise SystemExit(1)
-'; then
+'
+}
+
+remove_legacy_codex_plugin() {
+  if [[ "$REMOVE_LEGACY_CODEX_PLUGIN" != "1" ]]; then
+    return
+  fi
+  if ! codex plugin --help >/dev/null 2>&1; then
+    return
+  fi
+  if codex_router_plugin_is_installed; then
+    log "Removing legacy Codex-side Auto Router plugin"
+    if codex plugin remove codex-auto-router@codex-auto-router >/dev/null 2>&1; then
+      log "Removed Codex-side router. Routing @mentions belong in ChatGPT Web in v0.4+."
+    else
+      warn "Could not remove the legacy Codex-side plugin automatically."
+      warn "Run: codex plugin remove codex-auto-router@codex-auto-router"
+    fi
+  fi
+}
+
+install_codex_plugin() {
+  if [[ "$INSTALL_CODEX_PLUGIN" != "1" ]]; then
+    log "Codex-side plugin is disabled by default; ChatGPT Web performs routing"
+    return
+  fi
+
+  if ! codex plugin --help >/dev/null 2>&1; then
+    warn "This Codex CLI build does not expose 'codex plugin'; skipping Codex-side @mention installation."
+    return
+  fi
+
+  warn "Installing the Skill inside Codex is for debugging only; classification there consumes Codex usage."
+  log "Adding Codex Auto Router marketplace to Codex"
+  if ! codex plugin marketplace add "$REPO" --ref main >/dev/null; then
+    warn "Could not add the Codex Auto Router marketplace automatically."
+    warn "Run manually: codex plugin marketplace add $REPO --ref main"
+    return
+  fi
+
+  if codex_router_plugin_is_installed; then
     log "Codex Auto Router plugin is already installed in Codex"
   else
     log "Installing Codex Auto Router plugin into Codex"
@@ -138,7 +164,7 @@ raise SystemExit(1)
     fi
   fi
 
-  log "Codex plugin registered. Restart any already-open Codex TUI before using @codex-auto-router."
+  log "Codex plugin registered for debugging. Restart any already-open Codex TUI."
 }
 
 install_shell_alias() {
@@ -159,13 +185,13 @@ install_shell_alias() {
 
   touch "$rc"
   if ! grep -Fq "$marker" "$rc" 2>/dev/null; then
-    cat >> "$rc" <<'EOF'
+    cat >> "$rc" <<'ALIAS_EOF'
 
 # >>> codex-auto-router codex-first >>>
 # Interactive shell only. codex-route passes Codex subcommands/options through unchanged.
 alias codex='codex-route'
 # <<< codex-auto-router codex-first <<<
-EOF
+ALIAS_EOF
   fi
   log "Installed transparent Codex-first launcher alias in $rc"
 }
@@ -274,10 +300,10 @@ configure_tunnel() {
   tunnel-client doctor --profile "$PROFILE" --explain
 
   umask 077
-  cat > "$ENV_FILE" <<ENV
+  cat > "$ENV_FILE" <<ENV_EOF
 CONTROL_PLANE_TUNNEL_ID=$TUNNEL_ID
 CONTROL_PLANE_API_KEY=$API_KEY
-ENV
+ENV_EOF
   chmod 600 "$ENV_FILE"
 }
 
@@ -337,6 +363,7 @@ main() {
 
   install_codex
   install_router
+  remove_legacy_codex_plugin
   install_codex_plugin
   configure_router
   install_shell_alias
@@ -361,11 +388,13 @@ Tunnel profile: $PROFILE
 Codex-first launcher: alias codex='codex-route'
 
 Final account-side step:
-  1. In the ChatGPT Connectors page that was opened, connect/enable the tunnel-backed MCP app.
-  2. Install/enable the Codex Auto Router Skill/Plugin in ChatGPT.
-  3. Open a new terminal (or source your shell rc), cd into a project, and run: codex
-  4. Enter the coding task. ChatGPT opens; send the copied @codex-auto-router handoff message.
+  1. In ChatGPT Web, enable the tunnel-backed Codex Auto Router connector for the chat.
+  2. Install/enable the Codex Auto Router Skill/Plugin in ChatGPT Web.
+  3. Open a new terminal (or source your shell rc), cd into the exact project directory, and run: codex
+  4. Enter the coding task. ChatGPT opens; send the copied @codex-auto-router handoff message there.
   5. ChatGPT submits the tier and the same terminal resumes into the real Codex CLI automatically.
+
+IMPORTANT: do not type @codex-auto-router inside the Codex TUI. Routing must happen in ChatGPT Web; using the Skill inside Codex spends Codex usage and does not have the ChatGPT tunnel connector.
 
 Use 'codex --direct' to bypass web routing for one invocation. Codex subcommands such as 'codex plugin list' are passed through automatically.
 
