@@ -1,7 +1,7 @@
 {
   "name": "codex-auto-router",
-  "version": "0.3.1",
-  "description": "Classify coding tasks in ChatGPT and dispatch them to a connected local Codex CLI using the cheapest sufficient tier.",
+  "version": "0.4.0",
+  "description": "Start from Codex, classify the pending task in ChatGPT, then route it back to the cheapest sufficient Codex tier.",
   "author": {
     "name": "Darren",
     "url": "https://github.com/darrenintr"
@@ -9,20 +9,20 @@
   "homepage": "https://github.com/darrenintr/codex-auto-router",
   "repository": "https://github.com/darrenintr/codex-auto-router",
   "license": "MIT",
-  "keywords": ["codex", "router", "quota", "reasoning", "mcp", "developer-tools"],
+  "keywords": ["codex", "router", "quota", "reasoning", "mcp", "chatgpt", "developer-tools"],
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Auto Router",
-    "shortDescription": "Route ChatGPT coding tasks to local Codex with a quota-conscious tier.",
-    "longDescription": "ChatGPT classifies task complexity and, when the local MCP bridge is connected, starts the task directly in the local Codex CLI without spending a separate Codex turn on classification.",
+    "shortDescription": "Route pending local Codex tasks through ChatGPT.",
+    "longDescription": "A local Codex launcher captures the current task and project context, ChatGPT chooses the cheapest sufficient tier through the connected MCP bridge, and the launcher resumes into Codex with that model and reasoning effort.",
     "developerName": "Darren",
     "category": "Developer Tools",
-    "capabilities": ["Routing", "Developer Tools", "MCP"],
+    "capabilities": ["Routing", "Developer Tools", "MCP", "ChatGPT Handoff"],
     "websiteURL": "https://github.com/darrenintr/codex-auto-router",
     "defaultPrompt": [
-      "Route this coding task to the cheapest sufficient Codex tier and start it locally.",
-      "Hand this bug fix to my local Codex using an efficient tier.",
-      "Start this task in Codex without wasting quota on classification."
+      "Route my pending Codex task.",
+      "Choose the cheapest sufficient tier for the pending local Codex request.",
+      "Route this Codex task without spending a separate Codex turn on classification."
     ]
   }
 }
