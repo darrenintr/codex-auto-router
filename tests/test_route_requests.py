@@ -48,7 +48,7 @@ def test_route_request_preserves_project_context(monkeypatch, tmp_path: Path):
     assert request.status == "pending"
     assert request.workspace == str(workspace.resolve())
     assert request.branch == "feature/router"
-    assert request.remote == "https://github.com/example/repo.git"
+    assert request.repo_remote == "https://github.com/example/repo.git"
     assert request.changed_files == 3
 
     latest = get_latest_pending_route()
