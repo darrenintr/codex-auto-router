@@ -33,6 +33,23 @@ class RoutingConfig:
 
 
 @dataclass(frozen=True)
+class ClassifierConfig:
+    # local: run a cheap Codex tier locally before the real task
+    # chatgpt: use the v0.4 ChatGPT Web + MCP handoff
+    # heuristic: use the deterministic local heuristic only
+    mode: str = "local"
+    tier: str = "luna_low"
+    timeout_seconds: int = 120
+    fallback: str = "heuristic"  # heuristic | cancel
+    min_confidence: float = 0.80
+    repo_map_enabled: bool = True
+    repo_map_binary: str = "codex-repo-map"
+    repo_map_budget: int = 2500
+    repo_map_timeout_seconds: int = 30
+    max_source_fallback_files: int = 3
+
+
+@dataclass(frozen=True)
 class CodexConfig:
     binary: str = "codex"
 
@@ -58,6 +75,7 @@ class ChatGPTConfig:
 @dataclass(frozen=True)
 class AppConfig:
     routing: RoutingConfig = field(default_factory=RoutingConfig)
+    classifier: ClassifierConfig = field(default_factory=ClassifierConfig)
     codex: CodexConfig = field(default_factory=CodexConfig)
     bridge: BridgeConfig = field(default_factory=BridgeConfig)
     chatgpt: ChatGPTConfig = field(default_factory=ChatGPTConfig)
@@ -76,10 +94,10 @@ DEFAULT_CONFIG_TEXT = '''# codex-auto-router configuration
 # Model availability can vary by account. Change these names to match your Codex model picker.
 
 [routing]
-strategy = "heuristic"        # heuristic | ollama | hybrid
+strategy = "heuristic"        # heuristic | ollama | hybrid (used by CLI/fallback routing)
 include_git_context = true
 save_history = true
-max_auto_tier = "sol_medium"  # never routes above this tier
+max_auto_tier = "sol_medium"  # local automatic routing never exceeds this tier
 
 # Heuristic score thresholds.
 luna_low_max = 1
@@ -87,30 +105,45 @@ luna_medium_max = 3
 terra_low_max = 6
 terra_medium_max = 9
 
-# Optional local classifier. Only used when strategy is ollama or hybrid.
+# Optional local Ollama classifier used only by the legacy CLI strategy.
 ollama_model = "qwen3:1.7b"
 ollama_url = "http://127.0.0.1:11434"
+
+[classifier]
+# local = Luna/Codex classifier in the current repo (default)
+# chatgpt = ChatGPT Web + MCP handoff (v0.4 compatibility)
+# heuristic = no model classifier
+mode = "local"
+tier = "luna_low"
+timeout_seconds = 120
+fallback = "heuristic"        # heuristic | cancel
+min_confidence = 0.80
+
+# codex-repo-map builds a compact structural context before the classifier turn.
+repo_map_enabled = true
+repo_map_binary = "codex-repo-map"
+repo_map_budget = 2500
+repo_map_timeout_seconds = 30
+# If Repo Map is insufficient, the read-only classifier may inspect only a few source files.
+max_source_fallback_files = 3
 
 [codex]
 binary = "codex"
 
 [bridge]
-# Empty means the directory where codex-auto-mcp is launched.
+# Used only by ChatGPT/MCP mode and ChatGPT-first dispatch.
 default_workspace = ""
-# Additional directories ChatGPT may dispatch Codex into.
 allowed_roots = []
-# Remote ChatGPT route decisions and dispatches are capped here.
 max_remote_tier = "terra_medium"
 max_task_chars = 20000
 sandbox = "workspace-write"
 
 [chatgpt]
-# Codex-first flow: local launcher opens ChatGPT, then waits for the Skill to submit a route.
+# Used only when classifier.mode = "chatgpt".
 url = "https://chatgpt.com/"
 open_browser = true
 copy_handoff = true
 timeout_seconds = 300
-# If ChatGPT does not answer in time, either route locally or cancel.
 fallback = "heuristic"        # heuristic | cancel
 
 [routes.luna_low]
@@ -166,6 +199,25 @@ def load_config(path: Path | None = None) -> AppConfig:
         save_history=bool(routing_raw.get("save_history", config.routing.save_history)),
     )
 
+    classifier_raw = raw.get("classifier", {})
+    classifier = replace(
+        config.classifier,
+        mode=str(classifier_raw.get("mode", config.classifier.mode)),
+        tier=str(classifier_raw.get("tier", config.classifier.tier)),
+        timeout_seconds=int(classifier_raw.get("timeout_seconds", config.classifier.timeout_seconds)),
+        fallback=str(classifier_raw.get("fallback", config.classifier.fallback)),
+        min_confidence=float(classifier_raw.get("min_confidence", config.classifier.min_confidence)),
+        repo_map_enabled=bool(classifier_raw.get("repo_map_enabled", config.classifier.repo_map_enabled)),
+        repo_map_binary=str(classifier_raw.get("repo_map_binary", config.classifier.repo_map_binary)),
+        repo_map_budget=int(classifier_raw.get("repo_map_budget", config.classifier.repo_map_budget)),
+        repo_map_timeout_seconds=int(
+            classifier_raw.get("repo_map_timeout_seconds", config.classifier.repo_map_timeout_seconds)
+        ),
+        max_source_fallback_files=int(
+            classifier_raw.get("max_source_fallback_files", config.classifier.max_source_fallback_files)
+        ),
+    )
+
     codex_raw = raw.get("codex", {})
     codex = replace(config.codex, binary=str(codex_raw.get("binary", config.codex.binary)))
 
@@ -198,7 +250,14 @@ def load_config(path: Path | None = None) -> AppConfig:
         for name, route in config.routes.items()
     }
 
-    return AppConfig(routing=routing, codex=codex, bridge=bridge, chatgpt=chatgpt, routes=routes)
+    return AppConfig(
+        routing=routing,
+        classifier=classifier,
+        codex=codex,
+        bridge=bridge,
+        chatgpt=chatgpt,
+        routes=routes,
+    )
 
 
 def write_default_config(path: Path | None = None, *, overwrite: bool = False) -> Path:
