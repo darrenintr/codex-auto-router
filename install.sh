@@ -3,6 +3,12 @@ set -euo pipefail
 
 REPO="${CODEX_AUTO_REPO:-darrenintr/codex-auto-router}"
 REPO_URL="https://github.com/${REPO}.git"
+REPO_MAP_REPO="${CODEX_AUTO_REPO_MAP_REPO:-darrenintr/codex-repo-map}"
+REPO_MAP_URL="https://github.com/${REPO_MAP_REPO}.git"
+CLASSIFIER_MODE="${CODEX_AUTO_CLASSIFIER_MODE:-local}"
+INSTALL_REPO_MAP="${CODEX_AUTO_INSTALL_REPO_MAP:-1}"
+INSTALL_SHELL_ALIAS="${CODEX_AUTO_INSTALL_SHELL_ALIAS:-1}"
+NONINTERACTIVE="${CODEX_AUTO_NONINTERACTIVE:-0}"
 PROFILE="${CODEX_AUTO_TUNNEL_PROFILE:-codex-auto-router}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/codex-auto-router"
 CONFIG_FILE="$CONFIG_DIR/config.toml"
@@ -10,18 +16,18 @@ ENV_FILE="$CONFIG_DIR/tunnel.env"
 BIN_DIR="$HOME/.local/bin"
 WORKSPACE="${CODEX_AUTO_WORKSPACE:-$HOME/Projects}"
 MAX_REMOTE_TIER="${CODEX_AUTO_MAX_REMOTE_TIER:-terra_medium}"
-SKIP_TUNNEL="${CODEX_AUTO_SKIP_TUNNEL:-0}"
-NONINTERACTIVE="${CODEX_AUTO_NONINTERACTIVE:-0}"
-# v0.4 is Codex-first but ChatGPT-routed. Installing the routing Skill inside
-# Codex itself is opt-in because doing so spends Codex usage on classification.
-INSTALL_CODEX_PLUGIN="${CODEX_AUTO_INSTALL_CODEX_PLUGIN:-0}"
-REMOVE_LEGACY_CODEX_PLUGIN="${CODEX_AUTO_REMOVE_LEGACY_CODEX_PLUGIN:-1}"
-INSTALL_SHELL_ALIAS="${CODEX_AUTO_INSTALL_SHELL_ALIAS:-1}"
+
+if [[ -n "${CODEX_AUTO_SKIP_TUNNEL:-}" ]]; then
+  SKIP_TUNNEL="$CODEX_AUTO_SKIP_TUNNEL"
+elif [[ "$CLASSIFIER_MODE" == "chatgpt" ]]; then
+  SKIP_TUNNEL=0
+else
+  SKIP_TUNNEL=1
+fi
 
 log() { printf '\033[1;34m[codex-auto-router]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[codex-auto-router]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31m[codex-auto-router]\033[0m %s\n' "$*" >&2; exit 1; }
-
 have() { command -v "$1" >/dev/null 2>&1; }
 
 prompt() {
@@ -53,8 +59,7 @@ open_url() {
 ensure_path() {
   mkdir -p "$BIN_DIR"
   export PATH="$BIN_DIR:$PATH"
-  local line='export PATH="$HOME/.local/bin:$PATH"'
-  local rc
+  local line='export PATH="$HOME/.local/bin:$PATH"' rc
   case "${SHELL:-}" in
     */zsh) rc="$HOME/.zshrc" ;;
     */fish) rc="" ;;
@@ -76,7 +81,7 @@ install_ubuntu_deps() {
     missing+=("nodejs" "npm")
   fi
   if (( ${#missing[@]} > 0 )); then
-    have apt-get || die "This automatic dependency installer currently supports Ubuntu/Debian. Install manually: ${missing[*]}"
+    have apt-get || die "Install missing dependencies manually: ${missing[*]}"
     log "Installing Ubuntu/Debian dependencies: ${missing[*]}"
     sudo apt-get update
     sudo apt-get install -y python3 python3-venv pipx git curl unzip nodejs npm
@@ -98,102 +103,24 @@ install_router() {
   have pipx || die "pipx is required"
   log "Installing/updating codex-auto-router from $REPO"
   pipx install --force "git+$REPO_URL"
-  have codex-auto-mcp || die "codex-auto-mcp is not visible in PATH after installation"
   have codex-route || die "codex-route is not visible in PATH after installation"
 }
 
-codex_router_plugin_is_installed() {
-  codex plugin list --json 2>/dev/null | python3 -c '
-import json, sys
-try:
-    data = json.load(sys.stdin)
-except Exception:
-    raise SystemExit(1)
-for item in data.get("installed", []):
-    if item.get("name") == "codex-auto-router" and item.get("marketplaceName") == "codex-auto-router":
-        raise SystemExit(0)
-raise SystemExit(1)
-'
-}
-
-remove_legacy_codex_plugin() {
-  if [[ "$REMOVE_LEGACY_CODEX_PLUGIN" != "1" ]]; then
+install_repo_map() {
+  if [[ "$INSTALL_REPO_MAP" != "1" ]]; then
+    log "Repo Map installation skipped by CODEX_AUTO_INSTALL_REPO_MAP=$INSTALL_REPO_MAP"
     return
   fi
-  if ! codex plugin --help >/dev/null 2>&1; then
+  log "Installing/updating codex-repo-map from $REPO_MAP_REPO"
+  if ! pipx install --force "git+$REPO_MAP_URL"; then
+    warn "Repo Map installation failed. Local classification still works with bounded read-only inspection."
     return
   fi
-  if codex_router_plugin_is_installed; then
-    log "Removing legacy Codex-side Auto Router plugin"
-    if codex plugin remove codex-auto-router@codex-auto-router >/dev/null 2>&1; then
-      log "Removed Codex-side router. Routing @mentions belong in ChatGPT Web in v0.4+."
-    else
-      warn "Could not remove the legacy Codex-side plugin automatically."
-      warn "Run: codex plugin remove codex-auto-router@codex-auto-router"
-    fi
-  fi
-}
-
-install_codex_plugin() {
-  if [[ "$INSTALL_CODEX_PLUGIN" != "1" ]]; then
-    log "Codex-side plugin is disabled by default; ChatGPT Web performs routing"
-    return
-  fi
-
-  if ! codex plugin --help >/dev/null 2>&1; then
-    warn "This Codex CLI build does not expose 'codex plugin'; skipping Codex-side @mention installation."
-    return
-  fi
-
-  warn "Installing the Skill inside Codex is for debugging only; classification there consumes Codex usage."
-  log "Adding Codex Auto Router marketplace to Codex"
-  if ! codex plugin marketplace add "$REPO" --ref main >/dev/null; then
-    warn "Could not add the Codex Auto Router marketplace automatically."
-    warn "Run manually: codex plugin marketplace add $REPO --ref main"
-    return
-  fi
-
-  if codex_router_plugin_is_installed; then
-    log "Codex Auto Router plugin is already installed in Codex"
+  if have codex-repo-map; then
+    log "Repo Map found: $(command -v codex-repo-map)"
   else
-    log "Installing Codex Auto Router plugin into Codex"
-    if ! codex plugin add codex-auto-router@codex-auto-router; then
-      warn "Marketplace was added, but the Codex plugin install failed."
-      warn "Run manually: codex plugin add codex-auto-router@codex-auto-router"
-      return
-    fi
+    warn "codex-repo-map was installed but is not visible in PATH"
   fi
-
-  log "Codex plugin registered for debugging. Restart any already-open Codex TUI."
-}
-
-install_shell_alias() {
-  if [[ "$INSTALL_SHELL_ALIAS" != "1" ]]; then
-    log "Shell alias installation skipped by CODEX_AUTO_INSTALL_SHELL_ALIAS=$INSTALL_SHELL_ALIAS"
-    return
-  fi
-
-  local rc marker='# >>> codex-auto-router codex-first >>>'
-  case "${SHELL:-}" in
-    */zsh) rc="$HOME/.zshrc" ;;
-    */fish)
-      warn "Fish shell detected. Add this manually: alias codex codex-route"
-      return
-      ;;
-    *) rc="$HOME/.bashrc" ;;
-  esac
-
-  touch "$rc"
-  if ! grep -Fq "$marker" "$rc" 2>/dev/null; then
-    cat >> "$rc" <<'ALIAS_EOF'
-
-# >>> codex-auto-router codex-first >>>
-# Interactive shell only. codex-route passes Codex subcommands/options through unchanged.
-alias codex='codex-route'
-# <<< codex-auto-router codex-first <<<
-ALIAS_EOF
-  fi
-  log "Installed transparent Codex-first launcher alias in $rc"
 }
 
 configure_router() {
@@ -201,27 +128,89 @@ configure_router() {
   if [[ ! -f "$CONFIG_FILE" ]]; then
     codex-auto --init-config >/dev/null
   fi
-  CONFIG_FILE="$CONFIG_FILE" WORKSPACE="$WORKSPACE" MAX_REMOTE_TIER="$MAX_REMOTE_TIER" python3 - <<'PY'
+
+  CONFIG_FILE="$CONFIG_FILE" CLASSIFIER_MODE="$CLASSIFIER_MODE" WORKSPACE="$WORKSPACE" MAX_REMOTE_TIER="$MAX_REMOTE_TIER" python3 - <<'PY'
 from pathlib import Path
-import json, os, re
+import json
+import os
+import re
+
 p = Path(os.environ["CONFIG_FILE"])
 text = p.read_text(encoding="utf-8")
+mode = os.environ["CLASSIFIER_MODE"].strip().lower()
+if mode not in {"local", "chatgpt", "heuristic"}:
+    raise SystemExit("CODEX_AUTO_CLASSIFIER_MODE must be local, chatgpt, or heuristic")
+
+
+def set_key(source: str, section: str, key: str, value: str, *, section_defaults: str = "") -> str:
+    heading = f"[{section}]"
+    if heading not in source:
+        block = section_defaults.strip() or f"{heading}\n{key} = {value}"
+        return source.rstrip() + "\n\n" + block + "\n"
+
+    pattern = re.compile(rf"(?ms)^\[{re.escape(section)}\]\s*$.*?(?=^\[|\Z)")
+    match = pattern.search(source)
+    if not match:
+        raise SystemExit(f"could not locate [{section}] in {p}")
+    block = match.group(0)
+    key_pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
+    if key_pattern.search(block):
+        block = key_pattern.sub(f"{key} = {value}", block, count=1)
+    else:
+        block = block.rstrip() + f"\n{key} = {value}\n"
+    return source[: match.start()] + block + source[match.end() :]
+
+classifier_defaults = '''[classifier]
+mode = "local"
+tier = "luna_low"
+timeout_seconds = 120
+fallback = "heuristic"
+min_confidence = 0.80
+repo_map_enabled = true
+repo_map_binary = "codex-repo-map"
+repo_map_budget = 2500
+repo_map_timeout_seconds = 30
+max_source_fallback_files = 3'''
+
+text = set_key(text, "classifier", "mode", json.dumps(mode), section_defaults=classifier_defaults)
 workspace = os.path.realpath(os.environ["WORKSPACE"])
-tier = os.environ["MAX_REMOTE_TIER"]
-q = json.dumps(workspace)
-replacements = {
-    r'^default_workspace\s*=.*$': f'default_workspace = {q}',
-    r'^allowed_roots\s*=.*$': f'allowed_roots = [{q}]',
-    r'^max_remote_tier\s*=.*$': f'max_remote_tier = {json.dumps(tier)}',
-}
-for pattern, repl in replacements.items():
-    text, count = re.subn(pattern, repl, text, count=1, flags=re.MULTILINE)
-    if count != 1:
-        raise SystemExit(f"could not update {pattern!r} in {p}")
+text = set_key(text, "bridge", "default_workspace", json.dumps(workspace))
+text = set_key(text, "bridge", "allowed_roots", f"[{json.dumps(workspace)}]")
+text = set_key(text, "bridge", "max_remote_tier", json.dumps(os.environ["MAX_REMOTE_TIER"]))
 p.write_text(text, encoding="utf-8")
 PY
-  log "ChatGPT-first fallback workspace: $WORKSPACE"
-  log "Maximum remote tier: $MAX_REMOTE_TIER"
+
+  log "Classifier mode: $CLASSIFIER_MODE"
+  if [[ "$CLASSIFIER_MODE" == "local" ]]; then
+    log "Local classifier: luna_low with Repo Map when available"
+  fi
+}
+
+install_shell_alias() {
+  if [[ "$INSTALL_SHELL_ALIAS" != "1" ]]; then
+    log "Shell alias installation skipped"
+    return
+  fi
+  local rc marker='# >>> codex-auto-router codex-first >>>'
+  case "${SHELL:-}" in
+    */zsh) rc="$HOME/.zshrc" ;;
+    */fish)
+      warn "Fish shell detected. Add manually: alias codex codex-route"
+      return
+      ;;
+    *) rc="$HOME/.bashrc" ;;
+  esac
+  touch "$rc"
+  if ! grep -Fq "$marker" "$rc" 2>/dev/null; then
+    cat >> "$rc" <<'ALIAS_EOF'
+
+# >>> codex-auto-router codex-first >>>
+# Interactive shell only. Codex subcommands/options pass through unchanged.
+alias codex='codex-route'
+# <<< codex-auto-router codex-first <<<
+ALIAS_EOF
+  fi
+  log "Installed transparent launcher alias in $rc"
 }
 
 install_tunnel_client() {
@@ -235,15 +224,9 @@ install_tunnel_client() {
   case "$(uname -m)" in
     x86_64|amd64) arch="amd64" ;;
     aarch64|arm64) arch="arm64" ;;
-    *) die "Unsupported CPU architecture for automatic tunnel-client install: $(uname -m)" ;;
+    *) die "Unsupported CPU architecture: $(uname -m)" ;;
   esac
-  case "$os" in
-    linux) ;;
-    darwin)
-      die "On macOS install the supported tunnel client with: brew install openai/tools/tunnel-client"
-      ;;
-    *) die "Automatic tunnel-client install currently supports Linux." ;;
-  esac
+  [[ "$os" == "linux" ]] || die "Automatic tunnel-client installation currently supports Linux"
 
   log "Finding the latest official OpenAI tunnel-client release"
   latest="$(curl -fsSL -o /dev/null -w '%{url_effective}' https://github.com/openai/tunnel-client/releases/latest)"
@@ -257,42 +240,26 @@ install_tunnel_client() {
   [[ -n "$binary" ]] || die "Official release archive did not contain tunnel-client"
   install -m 0755 "$binary" "$BIN_DIR/tunnel-client"
   rm -rf "$tmp"
-  log "Installed tunnel-client $tag"
 }
 
 collect_tunnel_credentials() {
   TUNNEL_ID="${CONTROL_PLANE_TUNNEL_ID:-}"
   API_KEY="${CONTROL_PLANE_API_KEY:-}"
-
   if [[ (-z "$TUNNEL_ID" || -z "$API_KEY") && -r "$ENV_FILE" ]]; then
-    local saved_tunnel_id saved_api_key
-    saved_tunnel_id="$(grep -E '^CONTROL_PLANE_TUNNEL_ID=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)"
-    saved_api_key="$(grep -E '^CONTROL_PLANE_API_KEY=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)"
-    TUNNEL_ID="${TUNNEL_ID:-$saved_tunnel_id}"
-    API_KEY="${API_KEY:-$saved_api_key}"
-    if [[ -n "$TUNNEL_ID" && -n "$API_KEY" ]]; then
-      log "Reusing saved Secure MCP Tunnel credentials from $ENV_FILE"
-    fi
+    TUNNEL_ID="${TUNNEL_ID:-$(grep -E '^CONTROL_PLANE_TUNNEL_ID=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)}"
+    API_KEY="${API_KEY:-$(grep -E '^CONTROL_PLANE_API_KEY=' "$ENV_FILE" | head -n1 | cut -d= -f2- || true)}"
+    [[ -n "$TUNNEL_ID" && -n "$API_KEY" ]] && log "Reusing saved Secure MCP Tunnel credentials"
   fi
-
   if [[ -z "$TUNNEL_ID" ]]; then
-    log "A one-time Secure MCP Tunnel ID is required. Opening the OpenAI Tunnels page."
     open_url "https://platform.openai.com/settings/organization/tunnels"
     prompt TUNNEL_ID "Paste CONTROL_PLANE_TUNNEL_ID (tunnel_...): " || true
   fi
   if [[ -z "$API_KEY" ]]; then
-    log "A runtime API key with Tunnels Read + Use permissions is required. Opening the API keys page."
     open_url "https://platform.openai.com/settings/organization/api-keys"
     prompt API_KEY "Paste CONTROL_PLANE_API_KEY (input hidden): " 1 || true
   fi
-
-  if [[ -z "$TUNNEL_ID" || -z "$API_KEY" ]]; then
-    warn "Local installation is complete, but ChatGPT pairing was skipped because tunnel credentials were not supplied."
-    warn "Re-run this same installer with CONTROL_PLANE_TUNNEL_ID and CONTROL_PLANE_API_KEY set to finish pairing."
-    return 1
-  fi
+  [[ -n "$TUNNEL_ID" && -n "$API_KEY" ]] || return 1
   [[ "$TUNNEL_ID" == tunnel_* ]] || die "Tunnel ID must begin with tunnel_"
-  [[ "$API_KEY" != *$'\n'* && "$API_KEY" != *$'\r'* ]] || die "Invalid runtime API key"
   export CONTROL_PLANE_TUNNEL_ID="$TUNNEL_ID"
   export CONTROL_PLANE_API_KEY="$API_KEY"
 }
@@ -300,19 +267,13 @@ collect_tunnel_credentials() {
 configure_tunnel() {
   local mcp_command
   mcp_command="$(command -v codex-auto-mcp)"
-  log "Creating/updating Secure MCP Tunnel profile: $PROFILE"
   tunnel-client init \
     --force \
     --sample sample_mcp_stdio_local \
     --profile "$PROFILE" \
     --tunnel-id "$TUNNEL_ID" \
     --mcp-command "$mcp_command"
-
-  log "Validating tunnel configuration"
-  # Doctor starts its own temporary health listener. Use an ephemeral port so a
-  # previously running tunnel daemon on 127.0.0.1:8080 cannot make reinstall fail.
   tunnel-client doctor --profile "$PROFILE" --health.listen-addr 127.0.0.1:0 --explain
-
   umask 077
   cat > "$ENV_FILE" <<ENV_EOF
 CONTROL_PLANE_TUNNEL_ID=$TUNNEL_ID
@@ -323,12 +284,10 @@ ENV_EOF
 
 install_systemd_service() {
   if ! have systemctl || ! systemctl --user show-environment >/dev/null 2>&1; then
-    warn "systemd user services are unavailable. Start the tunnel manually with: tunnel-client run --profile $PROFILE"
+    warn "systemd user services unavailable; run tunnel-client manually when using ChatGPT mode"
     return
   fi
-  local unit_dir="$HOME/.config/systemd/user"
-  local unit="$unit_dir/codex-auto-router.service"
-  local tunnel_bin
+  local unit_dir="$HOME/.config/systemd/user" unit="$HOME/.config/systemd/user/codex-auto-router.service" tunnel_bin
   tunnel_bin="$(command -v tunnel-client)"
   mkdir -p "$unit_dir"
   cat > "$unit" <<UNIT
@@ -350,17 +309,11 @@ UNIT
   systemctl --user daemon-reload
   systemctl --user enable codex-auto-router.service >/dev/null
   systemctl --user restart codex-auto-router.service
-  if systemctl --user is-active --quiet codex-auto-router.service; then
-    log "Background tunnel service is active"
-  else
-    warn "The service was installed but is not active. Check: journalctl --user -u codex-auto-router -n 100"
-  fi
 }
 
 main() {
   log "One-command setup starting"
   ensure_path
-
   case "$(uname -s)" in
     Linux)
       if [[ -r /etc/os-release ]]; then
@@ -368,7 +321,7 @@ main() {
         . /etc/os-release
         case "${ID:-}" in
           ubuntu|debian|linuxmint|pop) install_ubuntu_deps ;;
-          *) warn "Detected ${ID:-Linux}; automatic package installation is optimized for Ubuntu/Debian." ;;
+          *) warn "Automatic dependency installation is optimized for Ubuntu/Debian" ;;
         esac
       fi
       ;;
@@ -378,13 +331,31 @@ main() {
 
   install_codex
   install_router
-  remove_legacy_codex_plugin
-  install_codex_plugin
+  install_repo_map
   configure_router
   install_shell_alias
 
   if [[ "$SKIP_TUNNEL" == "1" ]]; then
-    log "Tunnel setup skipped by CODEX_AUTO_SKIP_TUNNEL=1"
+    cat <<EOF
+
+Setup complete.
+
+Classifier mode: $CLASSIFIER_MODE
+Repo Map: $(have codex-repo-map && echo enabled || echo unavailable)
+Codex-first launcher: alias codex='codex-route'
+
+Reload your shell, then use:
+  source ~/.bashrc
+  cd /path/to/project
+  codex
+
+In local mode, Luna Low classifies the task in a read-only Codex exec turn. Repo Map supplies compact project structure first; the selected tier is then launched in the same terminal.
+
+The classifier prints its actual input/cached/output/reasoning token usage so routing overhead can be measured directly.
+
+Use 'codex --direct' to bypass routing for one invocation.
+To restore the v0.4 ChatGPT Web mode, set [classifier].mode = "chatgpt" and configure the optional tunnel.
+EOF
     exit 0
   fi
 
@@ -395,37 +366,17 @@ main() {
     open_url "https://chatgpt.com/#settings/Connectors"
     cat <<EOF
 
-Setup complete.
+Setup complete with optional ChatGPT Web routing.
 
-ChatGPT-first fallback workspace: $WORKSPACE
-Remote tier cap: $MAX_REMOTE_TIER
+Classifier mode: $CLASSIFIER_MODE
 Tunnel profile: $PROFILE
-Codex-first launcher: alias codex='codex-route'
+Repo Map: $(have codex-repo-map && echo enabled || echo unavailable)
 
-Final account-side step:
-  1. In ChatGPT Web, enable the tunnel-backed Codex Auto Router connector for the chat.
-  2. Install/enable the Codex Auto Router Skill/Plugin in ChatGPT Web.
-  3. Open a new terminal (or source your shell rc), cd into the exact project directory, and run: codex
-  4. Enter the coding task. ChatGPT opens; send the copied @codex-auto-router handoff message there.
-  5. ChatGPT submits the tier and the same terminal resumes into the real Codex CLI automatically.
-
-IMPORTANT: do not type @codex-auto-router inside the Codex TUI. Routing must happen in ChatGPT Web; using the Skill inside Codex spends Codex usage and does not have the ChatGPT tunnel connector.
-
-Use 'codex --direct' to bypass web routing for one invocation. Codex subcommands such as 'codex plugin list' are passed through automatically.
-
-Service status:
-  systemctl --user status codex-auto-router
+Reload your shell and run 'codex' from the exact project directory.
+When classifier.mode = "chatgpt", send the generated handoff in ChatGPT Web with the Auto Router connector enabled.
 EOF
   else
-    cat <<EOF
-
-Core installation complete.
-
-The Codex-first shell alias is installed. Open a new terminal (or source your shell rc).
-To finish ChatGPT pairing non-interactively, run the same one-command installer with:
-  CONTROL_PLANE_TUNNEL_ID=tunnel_... CONTROL_PLANE_API_KEY=sk-... \
-  curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh | bash
-EOF
+    warn "Tunnel credentials were not supplied. Local/heuristic routing remains usable."
   fi
 }
 
