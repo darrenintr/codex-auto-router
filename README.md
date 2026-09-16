@@ -1,105 +1,102 @@
 # codex-auto-router
 
-Route **from Codex → ChatGPT Web → back to Codex** so the classification step does not consume a separate Codex turn.
+Route a coding task to the cheapest sufficient Codex model/reasoning tier before the real task starts.
 
-The v0.4 flow starts in your terminal, where the current project is already known:
-
-```text
-$ cd /path/to/project
-$ codex
-› fix the animation regression
-```
-
-`codex-auto-router` captures the task plus current project/Git context, opens ChatGPT, and waits. In ChatGPT, send the handoff message (the installer/launcher copies it to your clipboard):
+v0.5 adds a **local Codex classifier mode** and first-class [`codex-repo-map`](https://github.com/darrenintr/codex-repo-map) support. The default path is now:
 
 ```text
-@codex-auto-router route pending Codex request route_...
-```
-
-ChatGPT chooses the cheapest sufficient tier and submits only that route decision through the connected MCP bridge. The waiting terminal then resumes into the **real Codex CLI** with the selected model/reasoning effort and the original task.
-
-> This project is an independent wrapper/integration for Codex CLI. It does not bypass, alter, or increase OpenAI account limits.
-
-## Why Codex-first
-
-Starting from Codex solves the project-context problem automatically. The router already knows:
-
-- the current working directory,
-- Git root,
-- Git remote,
-- current branch,
-- changed/untracked file counts,
-- approximate diff size,
-- the exact task you typed.
-
-That context is exposed to ChatGPT only through the narrow routing MCP tools, then the selected tier is written back to the waiting local launcher.
-
-## Architecture
-
-```text
-Terminal / current project
-        |
-        |  codex
-        |  task + cwd + git context
-        v
+current project
+     |
+     | codex
+     | task
+     v
 codex-route
-        |
-        |  create pending route request
-        |  open ChatGPT + wait
-        v
-ChatGPT Web
-        |
-        |  @codex-auto-router
-        |  get_pending_codex_route()
-        |  classify in ChatGPT
-        |  submit_codex_route()
-        v
-codex-route (same terminal)
-        |
-        |  selected model + reasoning
-        v
+     |
+     +--> codex-repo-map
+     |      incremental structural context
+     |      ~1k-3k tokens instead of repo rediscovery
+     |
+     +--> Luna Low / read-only Codex classifier
+     |      returns tier + confidence + usage
+     |
+     v
 real Codex CLI
+selected Luna / Terra / Sol tier
 ```
 
-There is no ChatGPT webpage scraping, cookie reuse, or generic remote shell. Because ChatGPT does not expose a consumer-Web-chat API for an external local process to silently post a message into your conversation, the Web handoff still requires one explicit ChatGPT send action.
+The older **Codex -> ChatGPT Web -> MCP -> Codex** route remains available as an optional compatibility mode.
+
+> This project is an independent wrapper/integration for Codex CLI. It does not bypass, alter, or increase OpenAI account limits. A local Codex classifier turn consumes normal Codex usage, so the launcher prints the classifier's actual token usage for measurement.
+
+## Why Repo Map
+
+A cheap classifier is only useful if it does not have to rediscover the repository on every task.
+
+Without Repo Map:
+
+```text
+Task -> Luna Low -> ls/rg/read files -> understand project -> choose tier
+```
+
+With Repo Map:
+
+```text
+Git + manifests + symbols + imports
+              |
+              v
+      persistent local index
+              |
+Task ----------+----> compact context
+                        |
+                        v
+                     Luna Low
+                        |
+                        v
+                   choose tier
+```
+
+Repo Map stores its index under the target repository's `.git/codex-repo-map/` directory. It can refresh incrementally without sending source to a model.
+
+If the compact map is insufficient, the Luna classifier runs in a **read-only sandbox** and is instructed to inspect only a small number of `source_fallback` files before making the route decision.
 
 ## One-command install
 
-Ubuntu/Debian is the primary supported automatic setup path.
+Ubuntu/Debian is the primary automatic setup path:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/darrenintr/codex-auto-router/main/install.sh | bash
 ```
 
-The installer automatically:
+The installer now defaults to `classifier.mode = "local"` and installs/updates both:
 
-- installs missing Ubuntu/Debian dependencies,
-- installs Codex CLI if necessary,
-- installs/updates `codex-auto-router`,
-- installs the Codex Auto Router marketplace/plugin,
-- installs the `codex-route` launcher,
-- adds `alias codex='codex-route'` to the interactive shell config,
-- creates the router config,
-- caps remote routing at `terra_medium` by default,
-- installs/configures OpenAI Secure MCP Tunnel,
-- creates a `systemd --user` service,
-- opens the OpenAI tunnel/API-key pages when needed,
-- opens ChatGPT Connector settings for the final account-side authorization.
+- `codex-auto-router`
+- `codex-repo-map`
 
-After installation, open a new terminal or reload your shell config:
+It also installs the transparent shell launcher:
+
+```bash
+alias codex='codex-route'
+```
+
+After installation:
 
 ```bash
 source ~/.bashrc
-```
-
-Then normal use is simply:
-
-```bash
 cd /path/to/project
 codex
 ```
 
-Enter your coding task. The router opens ChatGPT and waits for the route decision.
+Enter the task at the lightweight pre-router prompt. The router builds a compact Repo Map context, runs the Luna Low classifier, prints its usage, and then replaces the current process with the real Codex CLI using the selected model and effort.
+
+Typical output:
+
+```text
+› fix the fullscreen-to-inline return animation flicker
+[codex-auto-router] Repo Map context ready (~1180 tokens)
+[codex-auto-router] classifying locally with gpt-5.6-luna/low
+[codex-auto-router] local classifier selected terra_low (confidence 0.91) — Cross-module lifecycle debugging.
+[codex-auto-router] classifier usage: input=9124, cached=4096, output=43, reasoning=18
+```
 
 ### Bypass routing for one invocation
 
@@ -107,7 +104,7 @@ Enter your coding task. The router opens ChatGPT and waits for the route decisio
 codex --direct
 ```
 
-Normal Codex subcommands/options are passed through automatically, for example:
+Normal Codex subcommands/options still pass through automatically:
 
 ```bash
 codex plugin list
@@ -115,121 +112,187 @@ codex login
 codex --model gpt-5.6-luna
 ```
 
-## One-time ChatGPT pairing
+## Classifier modes
 
-The local machine still requires an explicitly authorized MCP connection. The installer handles the local pieces, but the OpenAI account/tunnel authorization must be approved by the user.
+The main mode switch lives in `~/.config/codex-auto-router/config.toml`:
 
-If you already have the tunnel credentials, setup can be non-interactive:
+```toml
+[classifier]
+mode = "local"               # local | chatgpt | heuristic
+tier = "luna_low"            # model/effort used for classification
+timeout_seconds = 120
+fallback = "heuristic"       # heuristic | cancel
+min_confidence = 0.80
+
+repo_map_enabled = true
+repo_map_binary = "codex-repo-map"
+repo_map_budget = 2500
+repo_map_timeout_seconds = 30
+max_source_fallback_files = 3
+```
+
+### `local` — default
+
+Runs a small Codex classification turn in the **same project root** using the configured classifier tier, normally `luna_low`.
+
+The classifier:
+
+- receives the user's exact task;
+- receives Repo Map's task-specific structural context;
+- runs with `--sandbox read-only`;
+- must not solve the task, modify files, build, test, or use the network;
+- may inspect only a bounded number of source fallback files when the map is insufficient;
+- returns one tier, a confidence value, and one short reason.
+
+If confidence is below `min_confidence`, the launcher raises the selected tier by one step, capped by `routing.max_auto_tier`.
+
+If the local classifier fails and `fallback = "heuristic"`, routing continues with the zero-model local heuristic.
+
+### `heuristic`
+
+No model classifier is used. The original deterministic task/Git heuristic picks a tier immediately.
+
+### `chatgpt`
+
+Preserves the v0.4 flow:
+
+```text
+codex-route
+  -> pending route request
+  -> ChatGPT Web Skill + MCP connector
+  -> submit_codex_route
+  -> same terminal launches real Codex
+```
+
+This mode requires the optional Secure MCP Tunnel setup. To make the installer configure it:
 
 ```bash
-CONTROL_PLANE_TUNNEL_ID=tunnel_... \
-CONTROL_PLANE_API_KEY=sk-... \
-CODEX_AUTO_WORKSPACE="$HOME/Projects" \
+CODEX_AUTO_CLASSIFIER_MODE=chatgpt \
+CODEX_AUTO_SKIP_TUNNEL=0 \
 curl -fsSL https://raw.githubusercontent.com/darrenintr/codex-auto-router/main/install.sh | bash
 ```
 
-Useful overrides:
+Local mode does **not** require ChatGPT Web, a connector, a Skill, or a tunnel.
+
+## Repo Map integration contract
+
+Auto Router calls:
 
 ```bash
-CODEX_AUTO_MAX_REMOTE_TIER="terra_low"   # stricter route cap
-CODEX_AUTO_SKIP_TUNNEL=1                  # local components only
-CODEX_AUTO_INSTALL_SHELL_ALIAS=0          # do not replace interactive `codex`
-CODEX_AUTO_NONINTERACTIVE=1               # never prompt on /dev/tty
+codex-repo-map context . \
+  --budget 2500 \
+  --json
 ```
 
-## Daily Codex-first flow
+and sends the task on stdin. Repo Map refreshes its incremental index first and returns `schema_version: 1` JSON.
 
-1. `cd` into the project you want Codex to work on.
-2. Run `codex`.
-3. Type the task into the lightweight pre-router prompt.
-4. ChatGPT opens automatically.
-5. Send the copied `@codex-auto-router route pending Codex request ...` message.
-6. ChatGPT reads the pending task/context, chooses a tier, and submits it.
-7. The original terminal automatically turns into the real Codex TUI with the task already supplied.
+The router deliberately treats Repo Map as an optimization rather than a hard dependency. If the binary is missing, the index fails, or a non-supported repository is used, Luna falls back to bounded read-only inspection instead of blocking routing.
 
-The route request is stored locally under:
-
-```text
-~/.local/state/codex-auto-router/routes/
-```
+The task is removed from the Repo Map payload before the classifier prompt so it is not paid for twice.
 
 ## Routing ladder
 
 | Tier | Default model | Reasoning | Typical use |
 | --- | --- | --- | --- |
-| `luna_low` | `gpt-5.6-luna` | low | renames, tiny UI changes, localized edits |
+| `luna_low` | `gpt-5.6-luna` | low | renames, tiny UI changes, deterministic local edits |
 | `luna_medium` | `gpt-5.6-luna` | medium | ordinary features and focused bug fixes |
 | `terra_low` | `gpt-5.6-terra` | low | multi-file work and nontrivial debugging |
 | `terra_medium` | `gpt-5.6-terra` | medium | subtle regressions, broad refactors, lifecycle/concurrency issues |
-| `sol_medium` | `gpt-5.6-sol` | medium | unusually difficult architecture/debugging fallback |
+| `sol_medium` | `gpt-5.6-sol` | medium | unusually difficult architecture/debugging |
 
-Model availability can vary by account. All route mappings are configurable.
+Local automatic routing is capped by:
 
-## Local safety controls
+```toml
+[routing]
+max_auto_tier = "sol_medium"
+```
 
-The MCP bridge exposes only scoped routing/dispatch tools:
-
-- `get_pending_codex_route(request_id?)`
-- `submit_codex_route(request_id, tier, reason?, confidence?)`
-- `launch_codex(task, tier, workspace?)` for the older ChatGPT-first flow
-- `get_codex_job(job_id)`
-- `get_codex_log(job_id, lines?)`
-- `cancel_codex_job(job_id)`
-
-It does **not** expose arbitrary shell execution.
-
-The local bridge enforces a tier cap:
+The ChatGPT/MCP path separately keeps its remote safety cap:
 
 ```toml
 [bridge]
 max_remote_tier = "terra_medium"
 ```
 
-So even if ChatGPT requests a stronger tier, the local bridge rejects it.
+## Measuring classifier overhead
 
-## ChatGPT handoff settings
+Every successful local classifier turn prints Codex's `turn.completed` usage:
+
+```text
+input=...
+cached=...
+output=...
+reasoning=...
+```
+
+This makes it possible to benchmark real routing overhead instead of estimating it from prompt length.
+
+A useful comparison is the same set of real tasks with:
 
 ```toml
-[chatgpt]
-url = "https://chatgpt.com/"
-open_browser = true
-copy_handoff = true
-timeout_seconds = 300
-fallback = "heuristic"   # heuristic | cancel
+repo_map_enabled = true
 ```
 
-If ChatGPT does not submit a route before the timeout, the default behavior is to use the local heuristic router rather than block forever.
+versus:
 
-## CLI-only router
+```toml
+repo_map_enabled = false
+```
 
-The original local router is still available:
+The target is to reduce repeated repository-discovery input while keeping route decisions stable.
+
+## Repo Map standalone
+
+Install/update manually:
 
 ```bash
-codex-auto "fix the padding of the video card"
+pipx install --force git+https://github.com/darrenintr/codex-repo-map.git
 ```
 
-Preview a local route without launching Codex:
+Inspect a project directly:
 
 ```bash
-codex-auto --dry-run --explain \
-  "refactor the shared-element transition and find the lifecycle regression"
+cd /path/to/project
+codex-repo-map init .
+codex-repo-map stats --json
+codex-repo-map context --task "fix transition flicker" --budget 2500 --json
 ```
 
-## Plugin / Skill source
+## Existing v0.4 installations
 
-The ChatGPT-side component lives at:
+Upgrading is enough:
 
-```text
-plugin/codex-auto-router/
+```bash
+curl -fsSL https://raw.githubusercontent.com/darrenintr/codex-auto-router/main/install.sh | bash
+source ~/.bashrc
 ```
 
-The Skill is:
+Existing config files without a `[classifier]` section still load safely: v0.5 defaults them to local classification. The installer also adds the new classifier section when needed.
 
-```text
-plugin/codex-auto-router/skills/codex-auto-router/
+Existing tunnel credentials and the MCP service can remain installed; local mode simply does not need them.
+
+## ChatGPT/MCP tools
+
+When `classifier.mode = "chatgpt"`, the bridge still exposes:
+
+- `get_pending_codex_route(request_id?)`
+- `submit_codex_route(request_id, tier, reason?, confidence?)`
+- `launch_codex(task, tier, workspace?)`
+- `get_codex_job(job_id)`
+- `get_codex_log(job_id, lines?)`
+- `cancel_codex_job(job_id)`
+
+There is no generic remote shell tool.
+
+## Legacy CLI router
+
+The original explicit CLI remains available:
+
+```bash
+codex-auto --dry-run --explain "fix the padding of the video card"
 ```
 
-When invoked for a pending Codex-first request, the Skill must use `get_pending_codex_route` + `submit_codex_route`; it must **not** call `launch_codex` for the same request, because the local launcher is already waiting to resume.
+Its existing `heuristic`, `ollama`, and `hybrid` scoring strategies remain separate from the transparent v0.5 `codex-route` classifier modes.
 
 ## Development
 
