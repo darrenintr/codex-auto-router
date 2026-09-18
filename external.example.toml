@@ -1,0 +1,40 @@
+[external]
+enabled = true
+api_base = "http://127.0.0.1:8765"
+codex_provider = "external"
+prefer_free = true
+min_remaining_tokens = 16000
+capacity_max_age_seconds = 300
+timeout_seconds = 1.5
+fallback_official = true
+
+# Tier meanings are still decided by codex-auto-router.
+# Put only models you consider suitable for each tier here; order is the fallback order.
+# When prefer_free=true, candidates marked free by codex-api-provider are preferred.
+#
+# min_remaining_tokens is checked against:
+# 1. exact/observed provider token windows when fresh;
+# 2. otherwise a conservative USD-credit/model-price estimate when available.
+#
+# Observed rate-limit headers older than capacity_max_age_seconds are treated as unknown
+# so a provider cannot remain blocked forever after its rate-limit window resets.
+
+[tiers.luna_low]
+models = [
+  "openrouter/qwen/qwen3-coder:free",
+  "groq/openai/gpt-oss-120b",
+]
+
+[tiers.luna_medium]
+models = [
+  "openrouter/qwen/qwen3-coder:free",
+]
+
+[tiers.terra_low]
+models = []
+
+[tiers.terra_medium]
+models = []
+
+[tiers.sol_medium]
+models = []
