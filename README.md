@@ -174,6 +174,31 @@ curl -fsSL https://raw.githubusercontent.com/darrenintr/codex-auto-router/main/i
 
 Local mode does **not** require ChatGPT Web, a connector, a Skill, or a tunnel.
 
+## External API providers
+
+Auto Router can optionally use [`codex-api-provider`](https://github.com/darrenintr/codex-api-provider) after the normal classifier chooses a tier. The classifier still decides the required capability; external models are explicit candidates for that tier and are filtered by availability, free/paid metadata and quota state.
+
+Install and start the local gateway:
+
+```bash
+pipx install git+https://github.com/darrenintr/codex-api-provider.git
+codex-api-provider init
+codex-api-provider serve
+```
+
+Add the gateway to `~/.codex/config.toml`:
+
+```toml
+[model_providers.external]
+name = "codex-api-provider"
+base_url = "http://127.0.0.1:8765/v1"
+wire_api = "responses"
+```
+
+Then copy `external.example.toml` to `~/.config/codex-auto-router/external.toml`, enable it, and map the tiers you want to external candidates. The router can prefer free models, reject exhausted or low-capacity providers, ignore stale observed rate limits, estimate a conservative token budget from USD credit plus model pricing, and fall back to the original official GPT route.
+
+See [External provider routing](docs/external-provider-routing.md) for the full configuration and quota semantics.
+
 ## Repo Map integration contract
 
 Auto Router calls:
