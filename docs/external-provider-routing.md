@@ -52,7 +52,7 @@ Candidate order is the configured fallback order. When `prefer_free = true`, a m
 
 A candidate is skipped when its provider reports `available=false`, `state=exhausted`, or `state=error`.
 
-If the provider reports an exact or observed token window, `min_remaining_tokens` is enforced. Unknown token capacity is not treated as zero because many APIs do not expose a real remaining-token figure.
+If the provider reports a fresh exact or observed token window, `min_remaining_tokens` is enforced. Observed rate-limit data older than `capacity_max_age_seconds` is treated as unknown so an expired limit cannot block a provider forever.\n\nWhen a provider reports a USD credit balance and model-specific input/output pricing, Auto Router also computes a conservative usable-token estimate using the more expensive per-token price. This is intentionally a lower-bound estimate, not a claimed exact token balance. Unknown token capacity is never treated as zero because many APIs do not expose a real remaining-token figure.
 
 If no external candidate survives:
 
